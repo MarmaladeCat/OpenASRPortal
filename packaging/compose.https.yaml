@@ -1,0 +1,30 @@
+# Run from the product root; this is a standalone single-instance deployment.
+services:
+  portal:
+    image: ${OPENASRPORTAL_IMAGE:-openasrportal:local}
+    build:
+      context: ..
+      dockerfile: packaging/docker/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    volumes:
+      - portal-data:/data
+    environment:
+      OPENASRPORTAL_HOST: 0.0.0.0
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+  nginx:
+    image: nginx:1.28-alpine
+    ports:
+      - '${OPENASRPORTAL_HTTPS_BIND:-127.0.0.1}:80:80'
+      - '${OPENASRPORTAL_HTTPS_BIND:-127.0.0.1}:443:443'
+    volumes:
+      - ./nginx/portal.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../runtime/tls:/etc/nginx/tls:ro
+    depends_on:
+      portal:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  portal-data:

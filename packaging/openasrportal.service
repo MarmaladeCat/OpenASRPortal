@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenASRPortal speech service
+After=network.target
+
+[Service]
+Type=simple
+User=openasrportal
+Group=openasrportal
+StateDirectory=openasrportal
+StateDirectoryMode=0700
+EnvironmentFile=/etc/openasrportal/service.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/openasrportal
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

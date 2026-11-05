@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OpenASRPortal · 首次设置管理密码</title>
+    <link rel="icon" href="/admin/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/admin/style.css" />
+  </head>
+  <body class="setup-page">
+    <main class="setup-card">
+      <img class="brand-icon" src="/admin/icon.svg" alt="OpenASRPortal" width="48" height="48" />
+      <span class="badge">首次部署 · 没有默认密码</span>
+      <h1>设置 Portal 管理密码</h1>
+      <p class="setup-description">
+        只需设置一次。以后使用此密码登录管理页面，识别客户端使用独立的 ASR Key。
+      </p>
+      <form id="setup-form">
+        <label for="setup-password">管理密码</label>
+        <input
+          id="setup-password"
+          type="password"
+          autocomplete="new-password"
+          minlength="12"
+          maxlength="1024"
+          required
+          autofocus
+        />
+        <p class="hint">至少 12 个字符，建议使用密码管理器生成。支持中文及空格。</p>
+        <label for="setup-confirm">再次输入密码</label>
+        <input
+          id="setup-confirm"
+          type="password"
+          autocomplete="new-password"
+          minlength="12"
+          maxlength="1024"
+          required
+        />
+        <button id="setup-submit" type="submit" class="primary">设置密码并进入管理</button>
+      </form>
+      <p id="setup-status" class="hint" role="status" aria-live="polite">正在检查初始化状态…</p>
+      <p class="setup-security">
+        密码只以带随机盐的安全哈希保存在 Portal
+        数据库中，不写入配置文件或环境变量。请妥善保管，管理页不会回显密码。
+      </p>
+    </main>
+    <script type="module" src="/admin/setup.js"></script>
+  </body>
+</html>

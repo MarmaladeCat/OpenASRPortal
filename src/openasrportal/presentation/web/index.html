@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OpenASRPortal · 管理设置</title>
+    <link rel="icon" href="/admin/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/admin/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <img class="brand-icon" src="/admin/icon.svg" alt="OpenASRPortal" width="48" height="48" />
+        <div>
+          <h1>OpenASRPortal <span>管理设置</span></h1>
+          <p>上游识别服务接入 · 下游客户端授权</p>
+        </div>
+        <div class="header-actions">
+          <span id="connection-badge" class="badge">未连接</span
+          ><button id="refresh" type="button">刷新</button
+          ><button id="logout" type="button" hidden>退出管理</button>
+        </div>
+      </header>
+      <section id="login" class="login-card">
+        <div class="page-heading">
+          <h2>登录 Portal 管理</h2>
+          <p>使用首次设置的管理密码登录。识别客户端使用独立的 ASR Key。</p>
+        </div>
+        <label
+          >管理密码<input
+            id="admin-key"
+            type="password"
+            autocomplete="current-password"
+            placeholder="填写你设置的管理密码" /></label
+        ><button id="connect" class="primary" type="button">进入管理设置</button>
+        <p class="hint">密码不会保存在浏览器或配置文件中。登录会话会自动过期，退出后立即失效。</p>
+      </section>
+      <div id="workspace" class="layout" hidden>
+        <nav id="admin-nav" role="tablist" aria-label="Portal 管理分类" aria-orientation="vertical">
+          <button
+            id="tab-overview"
+            data-page="overview"
+            role="tab"
+            aria-controls="page-overview"
+            aria-selected="true"
+          >
+            <span>◇</span>服务概览
+          </button>
+          <button
+            id="tab-upstream"
+            data-page="upstream"
+            role="tab"
+            aria-controls="page-upstream"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <span>↑</span>上游 ASR 接入
+          </button>
+          <button
+            id="tab-downstream"
+            data-page="downstream"
+            role="tab"
+            aria-controls="page-downstream"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <span>↓</span>下游客户端
+          </button>
+          <button
+            id="tab-usage"
+            data-page="usage"
+            role="tab"
+            aria-controls="page-usage"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <span>▥</span>用量与统计
+          </button>
+          <button
+            id="tab-public"
+            data-page="public"
+            role="tab"
+            aria-controls="page-public"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <span>▤</span>公共热词表
+          </button>
+          <button
+            id="tab-access"
+            data-page="access"
+            role="tab"
+            aria-controls="page-access"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <span>⌁</span>访问与权限
+          </button>
+          <div class="nav-note"><span class="dot"></span>Management v1</div>
+        </nav>
+        <main id="admin-body">
+          <section id="page-overview" class="page" role="tabpanel" aria-labelledby="tab-overview">
+            <div class="page-heading">
+              <h2>服务概览</h2>
+              <p>Portal 连接上下游，配置与客户端授权各自独立。</p>
+            </div>
+            <div class="stats">
+              <article>
+                <span>上游识别档案</span><strong id="profile-count">0</strong>
+                <p>云端 / 本地 ASR 服务</p>
+              </article>
+              <article>
+                <span>有效客户端 Key</span><strong id="key-count">0</strong>
+                <p>独立识别权限，可单独撤销</p>
+              </article>
+            </div>
+            <div class="flow">
+              <div>
+                <span>下游客户端</span><strong>输入法 · Notes · Drafts</strong
+                ><small>使用派生 ASR Key</small>
+              </div>
+              <span class="arrow">→</span>
+              <div>
+                <span>统一服务</span><strong>OpenASRPortal</strong><small>会话与协议隔离</small>
+              </div>
+              <span class="arrow">→</span>
+              <div>
+                <span>上游 ASR</span><strong>豆包 · 百炼 · 本地</strong
+                ><small>提供商凭据留在 Portal</small>
+              </div>
+            </div>
+            <div class="info-card">
+              <strong>两类配置各自管理</strong>
+              <p>
+                “上游 ASR 接入”用于配置服务端点、模型和提供商
+                Key；“下游客户端”用于派生、查看、复制和撤销客户端 ASR Key。
+              </p>
+              <p>管理 Key 仅进入管理页面，不能用于语音识别。</p>
+            </div>
+          </section>
+          <section
+            id="page-upstream"
+            class="page"
+            role="tabpanel"
+            aria-labelledby="tab-upstream"
+            hidden
+          >
+            <div class="page-heading">
+              <h2>上游 ASR 服务接入</h2>
+              <p>管理 Portal 使用的识别提供商、端点和模型。</p>
+              <p>同一提供商、同一端点可添加多个配置；使用不同配置 ID，分别填写各自的 Key。</p>
+              <p>客户端未指定配置 ID 时使用默认识别配置；指定 ID 时优先使用指定配置。</p>
+              <p>
+                额度耗尽会自动停用该配置，按下方排序选择下一可用配置作为默认；正在识别的会话会收尾。
+              </p>
+            </div>
+            <div class="toolbar">
+              <h3>识别档案</h3>
+              <button id="new" class="primary" type="button">增加服务接入</button>
+            </div>
+            <div id="profiles" class="cards"></div>
+            <section id="editor" class="editor-card" hidden>
+              <div class="section-title">
+                <h3 id="editor-title">服务接入配置</h3>
+                <span class="badge">上游提供商</span>
+              </div>
+              <form id="form" autocomplete="off">
+                <div class="two-columns">
+                  <label
+                    >配置 ID<input
+                      id="profile-id"
+                      required
+                      pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,99}" /></label
+                  ><label>显示名称<input id="profile-title" required maxlength="200" /></label>
+                </div>
+                <label>识别提供商<select id="provider"></select></label>
+                <div id="fields"></div>
+                <div class="actions">
+                  <button id="test" type="button">测试上游连接</button
+                  ><button class="primary" type="submit">保存接入配置</button
+                  ><button id="cancel" type="button">取消</button>
+                </div>
+              </form>
+            </section>
+            <p class="hint">
+              这里的上游 Key 由 Portal 连接服务时使用，不分发给输入法或其他客户端。
+            </p>
+          </section>
+          <section
+            id="page-public"
+            class="page"
+            role="tabpanel"
+            aria-labelledby="tab-public"
+            hidden
+          >
+            <div class="page-heading">
+              <h2>公共推荐热词表</h2>
+              <p>
+                管理多张共享推荐表。发布后所有有效 ASR Key
+                都可以选择下载；用户仍需逐词启用并保存个人表。
+              </p>
+              <p>更新、停用或删除公共表不会改写用户已经保存的个人热词。</p>
+            </div>
+            <div class="toolbar">
+              <h3>Portal 公共表</h3>
+              <div class="actions">
+                <button id="public-refresh" type="button">刷新列表</button
+                ><button id="public-new" class="primary" type="button">新增公共表</button>
+              </div>
+            </div>
+            <div id="public-list" class="cards"></div>
+            <section id="public-editor" class="editor-card" hidden>
+              <h3 id="public-editor-title">新增公共热词表</h3>
+              <form id="public-form">
+                <label>表 ID<input id="public-id" readonly placeholder="保存时自动生成" /></label>
+                <label>名称<input id="public-title" required maxlength="100" /></label>
+                <label
+                  >说明<textarea id="public-description" rows="2" maxlength="2000"></textarea>
+                </label>
+                <div class="two-columns">
+                  <label>来源网页<input id="public-homepage" type="url" maxlength="1000" /></label>
+                  <label>许可证 / 来源说明<input id="public-license" maxlength="500" /></label>
+                </div>
+                <label><input id="public-enabled" type="checkbox" />发布到客户端推荐目录</label>
+                <h4>导入或编辑正文</h4>
+                <label
+                  >UTF-8 词表文件<input
+                    id="public-file"
+                    type="file"
+                    accept=".txt,.tsv,.csv,.json,.yaml,.yml"
+                /></label>
+                <label
+                  >格式<select id="public-format">
+                    <option value="auto">自动识别</option>
+                    <option value="text">TXT：每行词语或词语|权重</option>
+                    <option value="tsv">TSV</option>
+                    <option value="csv">CSV</option>
+                    <option value="json">JSON</option>
+                    <option value="rime">RIME .dict.yaml</option>
+                  </select></label
+                >
+                <label
+                  >词表正文<textarea
+                    id="public-content"
+                    rows="10"
+                    spellcheck="false"
+                    placeholder="机器学习|4&#10;神经网络|4"
+                  ></textarea>
+                </label>
+                <p class="hint">
+                  每表最多 4 MiB / 50000 个有效词，共最多 100 张表。查看已有表时以 TSV
+                  展示，可增删词语、修改词频和权重。空表可先创建再补充。
+                </p>
+                <div class="actions">
+                  <button id="public-preview" type="button">解析 / 预览正文</button
+                  ><button class="primary" type="submit">保存公共表</button
+                  ><button id="public-cancel" type="button">取消编辑</button>
+                </div>
+              </form>
+              <h4>联网词库来源</h4>
+              <p class="hint">
+                可从下列项目下载词表文件后上传；也可选择内置联网来源载入正文，再编辑并保存为独立公共表。
+              </p>
+              <p>
+                <a href="https://github.com/thunlp/THUOCL" target="_blank" rel="noreferrer"
+                  >THUOCL：IT、医学、法律等领域</a
+                >
+                ·
+                <a href="https://github.com/iDvel/rime-ice" target="_blank" rel="noreferrer"
+                  >雾凇拼音</a
+                >
+                ·
+                <a href="https://github.com/amzxyz/rime-wanxiang" target="_blank" rel="noreferrer"
+                  >万象拼音</a
+                >
+              </p>
+              <label>联网来源<select id="public-source"></select></label>
+              <button id="public-online" type="button">下载来源并载入正文</button>
+              <p id="public-report" class="hint" role="status"></p>
+              <label>搜索预览词<input id="public-search" type="search" /></label>
+              <p id="public-count" class="hint"></p>
+              <div id="public-words" class="cards"></div>
+              <div class="actions">
+                <button id="public-prev" type="button">上一页</button
+                ><button id="public-next" type="button">下一页</button>
+              </div>
+            </section>
+          </section>
+          <section
+            id="page-downstream"
+            class="page"
+            role="tabpanel"
+            aria-labelledby="tab-downstream"
+            hidden
+          >
+            <div class="page-heading">
+              <h2>下游客户端与 ASR Key</h2>
+              <p>一个 Key 对应一个用户；同一 Key 的设备共用个人热词表，支持查看、复制和撤销。</p>
+              <p>可分别设置剩余时长或剩余 Token；两者都设置时，任一额度用尽即停止识别。</p>
+            </div>
+            <form id="key-form" class="key-create">
+              <label
+                >客户端 / Key 名称<input
+                  id="key-title"
+                  required
+                  maxlength="100"
+                  placeholder="例如：本机 OpenASRInput" /></label
+              ><button class="primary" type="submit">派生 ASR Key</button>
+            </form>
+            <section id="new-key" class="info-card key-result" hidden>
+              <strong>新客户端 Key</strong
+              ><input
+                id="new-key-value"
+                readonly
+                aria-label="新生成的 ASR Key"
+                spellcheck="false"
+              />
+              <div class="actions">
+                <button id="new-key-copy" type="button">复制 Key</button
+                ><button id="key-dismiss" type="button">隐藏 Key</button>
+              </div>
+              <p>在输入客户端中填写此 Key。之后仍可通过下方“查看 / 复制”重新获取。</p>
+            </section>
+            <div class="toolbar">
+              <h3>已派发的客户端 Key</h3>
+              <span class="muted">完整值按需显示</span>
+            </div>
+            <div id="keys" class="cards"></div>
+            <section id="key-hotwords" class="editor-card" hidden>
+              <h3 id="key-hotwords-title">用户热词表</h3>
+              <p class="hint">
+                默认关闭热词。同一 Key 的所有客户端共用个人表；只有保存的个人表会发送到上游。
+              </p>
+              <div class="actions">
+                <button id="key-hotwords-refresh" type="button">刷新此 Key 的热词</button
+                ><button id="key-hotwords-close" type="button">关闭</button>
+              </div>
+              <form id="key-hotwords-form">
+                <label><input id="key-hotwords-enabled" type="checkbox" />启用热词增强</label>
+                <h4>个人热词表</h4>
+                <p class="hint">
+                  最多 2000 词，权重 1–5。停用保留词条；总开关关闭时所有词暂停使用。
+                </p>
+                <div class="two-columns">
+                  <label
+                    >新增热词<input
+                      id="key-hotwords-new-text"
+                      maxlength="64"
+                      placeholder="输入词语"
+                  /></label>
+                  <label
+                    >权重<input
+                      id="key-hotwords-new-weight"
+                      type="number"
+                      min="1"
+                      max="5"
+                      value="4"
+                  /></label>
+                </div>
+                <button id="key-hotwords-add" type="button">新增一条</button>
+                <label>搜索个人热词<input id="key-hotwords-search" type="search" /></label>
+                <p id="key-hotwords-count" class="hint" role="status"></p>
+                <div class="hotword-table-scroll">
+                  <table class="hotword-table">
+                    <thead>
+                      <tr>
+                        <th>热词</th>
+                        <th>权重</th>
+                        <th>启用状态</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="key-hotwords-personal"></tbody>
+                  </table>
+                </div>
+                <div class="actions">
+                  <button id="key-hotwords-prev" type="button">上一页</button>
+                  <button id="key-hotwords-next" type="button">下一页</button>
+                  <button id="key-hotwords-download" type="button">下载个人热词表</button>
+                </div>
+                <label
+                  >导入个人热词表（JSON）<input
+                    id="key-hotwords-file"
+                    type="file"
+                    accept=".json,application/json"
+                /></label>
+                <p class="hint">
+                  按词语合并，同名词使用文件中的权重和启用状态；保存后同步到此 Key 的客户端。
+                </p>
+                <button id="key-hotwords-import" type="button">导入到个人热词表</button>
+                <button class="primary" type="submit">保存此 Key 的热词设置</button>
+              </form>
+              <p id="key-hotwords-selection" class="hint"></p>
+              <h4>公共推荐表</h4>
+              <p class="hint">加载到候选区，逐词点击“加入热词表”，保存后同步到此用户。</p>
+              <label>选择来源<select id="key-dictionary-source"></select></label>
+              <p id="key-dictionary-source-note" class="hint"></p>
+              <button id="key-dictionary-online" type="button">加载到候选区</button>
+              <p id="key-dictionary-report" class="hint" role="status"></p>
+              <h4>候选区</h4>
+              <label>搜索推荐词<input id="key-dictionary-search" type="search" /></label>
+              <p id="key-dictionary-count" class="hint" role="status"></p>
+              <div id="key-dictionary-recommendations" class="cards"></div>
+              <div class="actions">
+                <button id="key-dictionary-prev" type="button">上一页</button>
+                <button id="key-dictionary-next" type="button">下一页</button>
+                <button type="submit" form="key-hotwords-form" class="primary">
+                  保存此 Key 的热词设置
+                </button>
+              </div>
+            </section>
+            <p class="hint">
+              旧版只存哈希的 Key 不能反解；可导入已有原值，或派生替代 Key。已撤销 Key 不能用于识别。
+            </p>
+          </section>
+          <section id="page-usage" class="page" role="tabpanel" aria-labelledby="tab-usage" hidden>
+            <div class="page-heading">
+              <h2>用量与统计</h2>
+              <p>按时间查看下游 Key 和上游 ASR 的音频时长、实际报告 Token 与请求次数。</p>
+            </div>
+            <form id="usage-form" class="usage-filters">
+              <label>开始时间<input id="usage-from" type="datetime-local" required /></label>
+              <label>结束时间<input id="usage-to" type="datetime-local" required /></label>
+              <label
+                >时间分组<select id="usage-bucket">
+                  <option value="hour">小时</option>
+                  <option value="day" selected>天</option>
+                  <option value="month">月</option>
+                </select></label
+              >
+              <label
+                >下游 Key<select id="usage-key">
+                  <option value="">全部 Key</option>
+                </select></label
+              >
+              <label
+                >上游 ASR<select id="usage-profile">
+                  <option value="">全部上游</option>
+                </select></label
+              >
+              <button class="primary" type="submit">查询统计</button>
+              <button id="usage-recent" type="button">最近 7 天</button>
+            </form>
+            <p id="usage-period" class="hint" role="status"></p>
+            <div id="usage-summary" class="stats usage-summary"></div>
+            <h3>时间趋势</h3>
+            <div id="usage-chart" class="usage-chart"></div>
+            <div id="usage-timeline" class="table-scroll"></div>
+            <h3>按下游 Key 汇总</h3>
+            <div id="usage-keys" class="table-scroll"></div>
+            <h3>按上游 ASR 汇总</h3>
+            <div id="usage-profiles" class="table-scroll"></div>
+            <div class="info-card">
+              <strong>计量口径</strong>
+              <p>
+                下游时长按实际提交的 PCM
+                音频计算，不按连接等待时间计费。上游时长累计实际请求音频，HTTP
+                重复预览会重复计量；管理连接测试只计入上游。
+              </p>
+              <p>
+                音频统计精度为分钟，查询边界按整分钟覆盖；配额扣减按 PCM16 样本计算，不按分钟取整。
+              </p>
+              <p>
+                Token 只统计上游真实返回的 usage。未上报会明确标记；Token
+                限额不能用于不提供计量的上游。统计从新版本启用后开始，历史用量不会凭空补算。
+              </p>
+              <p>
+                当前限额是 Portal 本地预算，云平台的计费取整可能不同。Token
+                在请求返回后扣除，最后一个请求可能超过剩余 Token；到达限额后不会继续发起请求。
+              </p>
+            </div>
+          </section>
+          <section
+            id="page-access"
+            class="page"
+            role="tabpanel"
+            aria-labelledby="tab-access"
+            hidden
+          >
+            <div class="page-heading">
+              <h2>访问与权限</h2>
+              <p>当前服务地址与凭据权限边界。</p>
+            </div>
+            <label>当前 Portal 地址<input id="service-origin" readonly spellcheck="false" /></label>
+            <div class="permission-grid">
+              <article>
+                <h3>管理 Key / 管理会话</h3>
+                <p>管理上游接入档案</p>
+                <p>派生、查看、复制、撤销下游 Key</p>
+                <p>查询用量、修改剩余配额、管理上游顺序和停用状态</p>
+                <p>不授权识别接口</p>
+              </article>
+              <article>
+                <h3>客户端 ASR Key</h3>
+                <p>读取识别档案与能力</p>
+                <p>创建和取消自己的识别会话</p>
+                <p>不能管理或派生其他 Key</p>
+              </article>
+            </div>
+            <div class="info-card">
+              <strong>客户端 Key 保管</strong>
+              <p>
+                认证仍使用高熵 Key 摘要。可查看的原值以认证加密形式保管，解密文件只存于 Portal
+                数据目录。
+              </p>
+              <p>
+                备份 Portal 数据时，同时保留 portal.db 与
+                asr-key-vault.key。上游密钥继续保持不回显。
+              </p>
+            </div>
+          </section>
+        </main>
+      </div>
+      <footer>
+        <p id="status" role="status" aria-live="polite">等待连接管理服务</p>
+        <span>OpenASRPortal · Management v1</span>
+      </footer>
+    </div>
+    <script type="module" src="/admin/app.js"></script>
+  </body>
+</html>

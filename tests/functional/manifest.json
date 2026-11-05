@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "product": "OpenASRPortal",
+  "pythonPath": [
+    "src",
+    "tests"
+  ],
+  "cases": [
+    {
+      "id": "service-lifecycle",
+      "suite": "core",
+      "title": "首次设置、创建 Key/profile、重启与退出",
+      "expected": "真实服务子进程经公开 HTTP 完成初始化和配置；重启保留识别 Key/profile，错误 Key 被拒绝，停止清理就绪标记。",
+      "command": [
+        "{python}",
+        "-m",
+        "unittest",
+        "-v",
+        "test_service.ServiceTests.test_real_service_restart_auth_and_graceful_stop",
+        "test_service.ServiceTests.test_occupied_port_fails_without_publishing_readiness"
+      ]
+    },
+    {
+      "id": "admin-login",
+      "suite": "ui",
+      "title": "管理页首次密码设置、登录与退出",
+      "expected": "真实页面及独立 Portal 进程完成密码确认、登录失败、登录成功、立即清空密码框及注销。",
+      "command": [
+        "{electron}",
+        "tests/test_setup_ui.cjs"
+      ]
+    },
+    {
+      "id": "profile-management",
+      "suite": "ui",
+      "title": "接入配置、识别 Key 与配额管理",
+      "expected": "真实管理页面新增/编辑 profile，不回显或串用 Key，完成配额管理；上游为模拟服务。",
+      "command": [
+        "{electron}",
+        "tests/test_profile_editor.cjs"
+      ]
+    },
+    {
+      "id": "python-unit",
+      "suite": "unit",
+      "title": "python-unit",
+      "expected": "产品内完整回归；缺少依赖失败，条件跳过单独记录，不算完整验收通过。",
+      "command": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-q"
+      ]
+    }
+  ]
+}

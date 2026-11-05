@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+    if ! getent passwd openasrportal >/dev/null; then
+        adduser --system --group --home /var/lib/openasrportal --no-create-home openasrportal
+    fi
+    install -d -o openasrportal -g openasrportal -m 0700 /var/lib/openasrportal
+    if [ -x /usr/lib/openasrportal/runtime/openasrportal-runtime ]; then
+        /usr/lib/openasrportal/runtime/openasrportal-runtime --configure-installation
+    else
+        /usr/bin/python3 /usr/lib/openasrportal/configure.py
+    fi
+    chown root:openasrportal /etc/openasrportal/service.env
+    chmod 0640 /etc/openasrportal/service.env
+    deb-systemd-helper unmask openasrportal.service >/dev/null || true
+    deb-systemd-helper enable openasrportal.service >/dev/null || true
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        deb-systemd-invoke restart openasrportal.service || true
+    fi
+fi

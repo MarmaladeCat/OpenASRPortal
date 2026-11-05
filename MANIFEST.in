@@ -1,0 +1,10 @@
+recursive-include src *.py *.html *.css *.js
+recursive-include tests *.py *.ps1
+recursive-include docs *.md *.png
+include LICENSE
+include README.md README.zh-CN.md AGENTS.md AGENTS.zh-CN.md VERSION
+recursive-include tests/functional *.md *.json *.txt
+recursive-include scripts *.sh *.ps1 *.py
+recursive-include packaging Dockerfile *.yaml *.xml *.ps1 *.txt *.cmd *.url *.md *.conf .env.example
+include requirements.txt
+recursive-include examples *.py

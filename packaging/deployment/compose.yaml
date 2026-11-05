@@ -1,0 +1,14 @@
+services:
+  portal:
+    image: ${OPENASRPORTAL_IMAGE:-openasrportal:local}
+    pull_policy: never
+    ports:
+      - '${OPENASRPORTAL_BIND:-127.0.0.1}:${OPENASRPORTAL_PORT:-10087}:10087'
+    volumes:
+      - '${OPENASRPORTAL_DATA:-./data}:/data'
+    environment:
+      # Container bridge only; this does not publish a host wildcard listener.
+      OPENASRPORTAL_HOST: 0.0.0.0
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped

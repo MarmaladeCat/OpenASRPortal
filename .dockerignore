@@ -1,0 +1,12 @@
+.git/
+.venv/
+data/
+.cache/
+__pycache__/
+*.egg-info/
+.env
+runtime/
+test-results/
+build/
+dist/
+.git

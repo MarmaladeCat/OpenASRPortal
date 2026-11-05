@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openasrportal"
+version = "1.0.0"
+description = "Independent speech protocol portal"
+license = {file = "LICENSE"}
+classifiers = ["License :: OSI Approved :: GNU General Public License v3 (GPLv3)"]
+requires-python = ">=3.10"
+dependencies = ["aiohttp>=3.12,<4", "websockets==13.1", "httpx==0.28.1", "cryptography>=46,<50", "tzdata>=2025.2", "jieba==0.42.1"]
+
+[project.scripts]
+openasrportal = "openasrportal.entrypoints.cli:main"
+openasrportal-migrate = "openasrportal.entrypoints.migrate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["openasrportal*"]
+
+[tool.setuptools.package-data]
+openasrportal = ["presentation/web/*", "presentation/dictionaries/*.txt"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

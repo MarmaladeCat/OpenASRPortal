@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+if [ "$1" = remove ]; then
+    deb-systemd-helper mask openasrportal.service >/dev/null || true
+fi
+if [ "$1" = purge ]; then
+    deb-systemd-helper purge openasrportal.service >/dev/null || true
+    deb-systemd-helper unmask openasrportal.service >/dev/null || true
+fi
+if [ -d /run/systemd/system ]; then systemctl daemon-reload; fi

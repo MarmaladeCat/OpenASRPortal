@@ -1,0 +1,18 @@
+services:
+  portal:
+    image: ${OPENASRPORTAL_IMAGE:-openasrportal:local}
+    build:
+      context: ..
+      dockerfile: packaging/docker/Dockerfile
+    ports:
+      - '${OPENASRPORTAL_BIND:-127.0.0.1}:${OPENASRPORTAL_PORT:-10087}:10087'
+    volumes:
+      - '${OPENASRPORTAL_DATA:-portal-data}:/data'
+    environment:
+      # Explicit bridge-network listener; published host ports stay loopback.
+      OPENASRPORTAL_HOST: 0.0.0.0
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+volumes:
+  portal-data:

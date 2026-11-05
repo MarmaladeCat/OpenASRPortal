@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64">
+  <title>OpenASRPortal</title>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#d97706"/>
+  <path d="M17 24h30l-7-7M47 40H17l7 7" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

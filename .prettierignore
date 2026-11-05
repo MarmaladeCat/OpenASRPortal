@@ -1,0 +1,12 @@
+.git/
+.cache/
+.venv/
+.ruff_cache/
+data/
+build/
+dist/
+*.egg-info/
+__pycache__/
+runtime/
+test-results/
+node_modules/

@@ -1,0 +1,1 @@
+"""Upstream speech adapters."""

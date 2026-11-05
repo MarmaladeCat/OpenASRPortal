@@ -1,0 +1,28 @@
+<service>
+  <id>OpenASRPortal</id>
+  <name>OpenASRPortal</name>
+  <description>OpenASRPortal HTTP/WebSocket v1 speech gateway</description>
+  <executable>%BASE%\python\python.exe</executable>
+  <startarguments>-B -m openasrportal.entrypoints.service run --config "%ProgramData%\OpenASRPortal\service.json"</startarguments>
+  <stopexecutable>%BASE%\python\python.exe</stopexecutable>
+  <stoparguments>-B -m openasrportal.entrypoints.service stop --config "%ProgramData%\OpenASRPortal\service.json"</stoparguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <env name="PYTHONUTF8" value="1" />
+  <env name="PYTHONUNBUFFERED" value="1" />
+  <env name="PYTHONDONTWRITEBYTECODE" value="1" />
+  <serviceaccount>
+    <domain>NT AUTHORITY</domain>
+    <user>LocalService</user>
+  </serviceaccount>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+  <logpath>%ProgramData%\OpenASRPortal\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+</service>
