@@ -15,7 +15,19 @@ def main():
             description="Initialize Portal installation paths and network settings"
         )
         parser.add_argument("--root", type=Path, default=Path("/"))
-        configure(parser.parse_args(sys.argv[2:]).root)
+        parser.add_argument("--previous-version", default="")
+        args = parser.parse_args(sys.argv[2:])
+        configure(args.root, args.previous_version)
+    elif sys.argv[1:2] == ["--provision-local-input"]:
+        from openasrportal.entrypoints.provision import main as provision
+
+        del sys.argv[1]
+        provision()
+    elif sys.argv[1:2] == ["--open-setup"]:
+        from openasrportal.entrypoints.onboarding import main as onboarding
+
+        del sys.argv[1]
+        onboarding()
     elif sys.argv[1:2] == ["--migrate"]:
         from openasrportal.entrypoints.migrate import main as migrate
 

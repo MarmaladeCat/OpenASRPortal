@@ -6,6 +6,8 @@
 
 ## 本地开发
 
+当前源码目录与迁移见 [安装生命周期](installation.zh-CN.md)。`openasrportal --provision-local-input --installed --client-id ID --output 文件` 是安装所有者命令，调用前停止服务并保护接收者交接文件。`openasrportal --open-setup --url-file 文件` 根据公开认证状态决定是否打开浏览器。合体构建器用 `python scripts/release.py --source-digest` 获取源码指纹。翻译目录由本产品独立维护；UI 测试覆盖两种语言下的首次设置与管理页面，确保不丢失草稿、不翻译用户数据。
+
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
@@ -36,7 +38,7 @@ python scripts/build.py --deployment windows --arch amd64 --wix-bin <WiX目录>
 
 deb 使用 Ubuntu 22.04 / PyInstaller 6.16.0；镜像使用 Python 3.12.10 / Debian 12；MSI 构建编排使用原生 Windows Python 3.12.10 与 WiX 3.14.1，包内私有运行时为 Python 3.13.16、服务包装器 WinSW 2.12.0。构建配方在 packaging/，入口再调用 `build_portable_deb.py`、`build_image.py` 或 `build_windows.py`，不依赖外层源码。
 
-候选在 `.cache/build/artifacts/<系统>/<架构>/<变体>/`，发布到 `release/1.0.0/`。VERSION 与工具包版本均为 1.0.0。目录平铺 deb、镜像部署包、MSI、文档 ZIP、中英文 README、manifest.json 与 SHA256SUMS；Docker 包包含真实 image.tar 和手写部署说明。dist/ 不作为输出目录。
+候选在 `.cache/build/artifacts/<系统>/<架构>/<变体>/`，发布到 `release/1.0.1/`。VERSION 与工具包版本均为 1.0.1。目录平铺 deb、镜像部署包、MSI、文档 ZIP、中英文 README、manifest.json 与 SHA256SUMS；Docker 包包含真实 image.tar 和手写部署说明。dist/ 不作为输出目录。
 
 发布器检查来源、唯一候选、版本、架构和哈希后替换目录，同源的其他平台产物合并保留。构建成功不代表已完成服务安装、升级、卸载或真实识别验收；运行记录放 test-results/。
 

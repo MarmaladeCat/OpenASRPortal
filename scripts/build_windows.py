@@ -71,7 +71,12 @@ def wix(payload, filename):
     element(product, "Property", Id="ARPNOREPAIR", Value="1")
     element(product, "Property", Id="ARPSYSTEMCOMPONENT", Value="1")
     element(product, "Property", Id="REMOVEUSERDATA", Value="0", Secure="yes")
-    for property_id, value_name in (("PORTALDATADIR", "StateDir"), ("INSTALLDIR", "InstallDir")):
+    element(product, "Property", Id="OPENASRPORTAL_NO_LAUNCH", Secure="yes")
+    element(product, "Property", Id="OPENASR_PREVIOUS_INSTALLATION", Secure="yes")
+    for property_id, value_name in (
+        ("LEGACYPORTALDATADIR", "StateDir"),
+        ("INSTALLDIR", "InstallDir"),
+    ):
         stored = element(product, "Property", Id=property_id, Secure="yes")
         element(
             stored,
@@ -101,7 +106,8 @@ def wix(payload, filename):
     program_files = element(target, "Directory", Id="ProgramFiles64Folder")
     install = element(program_files, "Directory", Id="INSTALLDIR", Name="OpenASRPortal")
     data = element(target, "Directory", Id="CommonAppDataFolder")
-    element(data, "Directory", Id="PORTALDATADIR", Name="OpenASRPortal")
+    shared = element(data, "Directory", Id="OpenASRDataRoot", Name="OpenASR")
+    element(shared, "Directory", Id="PORTALDATADIR", Name="Portal")
     menu = element(
         element(target, "Directory", Id="ProgramMenuFolder"),
         "Directory",
@@ -295,6 +301,16 @@ def wix(payload, filename):
     element(
         product,
         "CustomAction",
+        Id="RestorePortalData",
+        Property="PORTALDATADIR",
+        Value="[LEGACYPORTALDATADIR]",
+    )
+    element(
+        sequence, "Custom", Action="RestorePortalData", Before="CostFinalize"
+    ).text = "LEGACYPORTALDATADIR AND REMOVE"
+    element(
+        product,
+        "CustomAction",
         Id="SetInstallLocation",
         Property="ARPINSTALLLOCATION",
         Value="[INSTALLDIR]",
@@ -318,7 +334,8 @@ def wix(payload, filename):
         '"[System64Folder]WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile '
         '-NonInteractive -ExecutionPolicy Bypass -File "[#' + ids["prepare_msi.ps1"] + ']" '
         '-Python "[#' + ids["python/python.exe"] + ']" '
-        '-DataDir "[PORTALDATADIR]." -InstallDir "[INSTALLDIR]."'
+        '-DataDir "[PORTALDATADIR]." -InstallDir "[INSTALLDIR]." '
+        '-LegacyDataDir "[LEGACYPORTALDATADIR]" -PreviousInstallation "[Installed][WIX_UPGRADE_DETECTED][OPENASR_PREVIOUS_INSTALLATION]"'
     )
     element(
         product,
@@ -397,6 +414,18 @@ def wix(payload, filename):
     wipe = 'REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE AND REMOVEUSERDATA="1"'
     element(sequence, "Custom", Action="SetRemovePortalData", After="StopServices").text = wipe
     element(sequence, "Custom", Action="RemovePortalData", After="SetRemovePortalData").text = wipe
+    element(
+        product,
+        "CustomAction",
+        Id="OpenInitialSetup",
+        FileKey=ids["python/pythonw.exe"],
+        ExeCommand='-B -m openasrportal.entrypoints.onboarding --url-file "[INSTALLDIR]PortalAdmin.url"',
+        Return="asyncNoWait",
+        Impersonate="yes",
+    )
+    element(
+        sequence, "Custom", Action="OpenInitialSetup", After="InstallFinalize"
+    ).text = "&PortalService=3 AND NOT REMOVE AND UILevel >= 5 AND NOT OPENASRPORTAL_NO_LAUNCH"
     element(product, "UIRef", Id="WixUI_InstallDir")
     element(product, "Property", Id="WIXUI_INSTALLDIR", Value="INSTALLDIR")
     element(product, "WixVariable", Id="WixUIBannerBmp", Value="installer-banner.bmp")

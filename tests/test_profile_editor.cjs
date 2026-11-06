@@ -52,6 +52,7 @@ async function run() {
     webPreferences: { nodeIntegration: false, contextIsolation: true }
   });
   await window.loadURL(ready.url + '/admin');
+  await require('./language_ui.cjs').language(window, 'zh-CN');
   await js(`document.getElementById('admin-key').value='test-admin-password';
     document.getElementById('connect').click();`);
   await wait('!document.getElementById("workspace").hidden');
@@ -97,10 +98,19 @@ async function run() {
     .find(button=>button.textContent==='修改').click();`);
   assert.equal(await js(`${secret}.value`), '');
   assert.equal(await js(`${secret}.required`), false);
-  await js(`document.getElementById('profile-title').value='修改后的备用豆包';
+  await js(`document.getElementById('profile-title').value='删除';
     document.getElementById('form').requestSubmit();`);
   await wait(`document.querySelector('#profiles article[data-id="doubao-2"] h3')
-    .textContent.includes('修改后的备用豆包')`);
+    .textContent.includes('删除')`);
+  await require('./language_ui.cjs').language(window, 'en');
+  assert.equal(
+    await js(
+      'document.querySelector(\'#profiles article[data-id="doubao-2"] h3 [translate="no"]\').textContent'
+    ),
+    '删除',
+    'User profile title must not be translated'
+  );
+  await require('./language_ui.cjs').language(window, 'zh-CN');
   assert.equal(await js('window.profileWrites.at(-1).configuration.apiKey'), undefined);
   // Cancelled input and provider changes must not leak into another editor.
   await newDoubao();

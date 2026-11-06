@@ -6,9 +6,9 @@ After=network.target
 Type=simple
 User=openasrportal
 Group=openasrportal
-StateDirectory=openasrportal
+StateDirectory=openasr/portal
 StateDirectoryMode=0700
-EnvironmentFile=/etc/openasrportal/service.env
+EnvironmentFile=/var/lib/openasr/portal/service.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/usr/bin/openasrportal
 Restart=on-failure

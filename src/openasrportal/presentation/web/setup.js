@@ -1,3 +1,4 @@
+import './i18n.mjs';
 const byId = (id) => document.getElementById(id);
 const destination = '/admin';
 

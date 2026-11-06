@@ -699,6 +699,10 @@ class Portal:
             "personal-hotwords.mjs",
             "setup.html",
             "setup.js",
+            "i18n.mjs",
+            "messages.mjs",
+            "dynamic-messages.mjs",
+            "error-messages.mjs",
         ):
             raise web.HTTPNotFound()
         response = web.FileResponse(Path(__file__).parents[1] / "presentation/web" / name)

@@ -149,6 +149,7 @@ header {
   flex: none;
 }
 .brand-icon {
+  flex: none;
   display: grid;
   place-items: center;
   width: 40px;
@@ -624,6 +625,11 @@ footer > span {
   }
   header {
     padding: 14px 16px;
+    flex-wrap: wrap;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
   h1 span,
   .header-actions .badge {
@@ -643,6 +649,9 @@ footer > span {
   }
 }
 @media (max-width: 500px) {
+  .header-actions {
+    width: 100%;
+  }
   .shell {
     height: auto;
     min-height: 100vh;
@@ -694,4 +703,16 @@ textarea {
 #public-words {
   max-height: 340px;
   overflow-y: auto;
+}
+.language-switch {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+.language-switch button[aria-pressed='true'] {
+  font-weight: 700;
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+.setup-language {
+  float: right;
 }

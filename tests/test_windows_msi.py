@@ -40,6 +40,7 @@ class WindowsMSITests(unittest.TestCase):
             "remove_data.ps1",
             "Uninstall.exe",
             "python/python.exe",
+            "python/pythonw.exe",
         ):
             file = self.payload / name
             file.parent.mkdir(parents=True, exist_ok=True)
@@ -133,7 +134,11 @@ class WindowsMSITests(unittest.TestCase):
             ROOT / "packaging/windows/OpenASRPortal.xml", self.directory / "OpenASRPortal.xml"
         )
         source = (ROOT / "packaging/windows/prepare_msi.ps1").read_text(encoding="utf-8")
-        fragment = source[source.index("$xmlPath =") : source.index("$service = Get-Service")]
+        fragment = source[
+            source.index("$xmlPath =") : source.index(
+                "$service = Get-Service", source.index("$xmlPath =")
+            )
+        ]
         script = (
             "$ErrorActionPreference='Stop'\n"
             "$ProgressPreference='SilentlyContinue'\n"

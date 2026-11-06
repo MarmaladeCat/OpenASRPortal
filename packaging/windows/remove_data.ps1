@@ -12,7 +12,7 @@ function Assert-NoLinks([string]$Path) {
 function Remove-OwnedDirectory([string]$Path) {
     if (-not $Path) {return}
     $full=[IO.Path]::GetFullPath($Path).TrimEnd('\')
-    if ([IO.Path]::GetFileName($full) -notmatch '^OpenASRPortal(?:-MsiTest-[a-f0-9]+)?$') {throw 'Refusing unrecognized Portal state directory.'}
+    if ($full -ne (Join-Path $env:ProgramData 'OpenASR\Portal') -and [IO.Path]::GetFileName($full) -notmatch '^OpenASRPortal(?:-MsiTest-[a-f0-9]+)?$') {throw 'Refusing unrecognized Portal state directory.'}
     if (-not (Test-Path -LiteralPath $full)) {return}
     Assert-NoLinks $full
     $config=Join-Path $full 'service.json'
@@ -37,6 +37,7 @@ function Remove-OwnedDirectory([string]$Path) {
 }
 $isolated=[IO.Path]::GetFileName($DataDir) -like 'OpenASRPortal-MsiTest-*'
 $targets=@($DataDir)
+if ($DataDir -eq (Join-Path $env:ProgramData 'OpenASR\Portal')) { $targets += Join-Path $env:ProgramData 'OpenASRPortal' }
 if (-not $isolated) {$targets += $UserDataDir}
 if ($AllUsers -and [IO.Path]::GetFileName($DataDir) -notlike 'OpenASRPortal-MsiTest-*') {
     $targets += @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\*' |

@@ -1,8 +1,12 @@
-# OpenASRPortal 1.0.0 版本说明
+# OpenASRPortal 1.0.1 版本说明
 
 [English](release.md) | **简体中文**
 
-产品与包工具版本均为 1.0.0；客户端与管理协议均保持 v1。全部文档提供英文默认入口及中文链接。本说明描述功能范围，具体平台验收随候选包单独记录。
+[OpenASRInput](https://github.com/MarmaladeCat/OpenASRInput) 通过 Portal 提供系统语音输入，合体包计划放在 [Input Release 页](https://github.com/MarmaladeCat/OpenASRInput/releases)。每个安装包配同名 `文件名.sha256`，每份只含对应包的一行校验记录。
+
+1.0.1 候选增加统一目录、保留配置重装、按需首次设置和中英文切换，详见 [安装说明](installation.zh-CN.md)。候选供维护者审核与手动测试，审核后再正式发布。
+
+产品与包工具版本均为 1.0.1；客户端与管理协议均保持 v1。全部文档提供英文默认入口及中文链接。本说明描述功能范围，具体平台验收随候选包单独记录。
 
 ## 本版能力
 
@@ -16,7 +20,7 @@
 
 Linux deb 为 `*_local-service.deb`，镜像包为 `*_docker.tar.gz`，Windows 为 `*_native.msi`；按 amd64/arm64 选择。独立安装不自动配置录音客户端。
 
-完整人工文档在 `OpenASRPortal_1.0.0_docs.zip`，解压后从 README.md 阅读，用户操作在 docs/user-guide.md，客户端协议在 docs/API.md，管理对接在 docs/MANAGEMENT.md。归档还保留 LICENSE、部署说明、Compose/NGINX 模板及证书脚本的源码相对路径；实际运行部署命令使用 Docker 部署包的平铺布局。核对 manifest.json 和 SHA256SUMS。
+完整人工文档在 `OpenASRPortal_1.0.1_docs.zip`，解压后从 README.md 阅读，用户操作在 docs/user-guide.md，客户端协议在 docs/API.md，管理对接在 docs/MANAGEMENT.md。归档还保留 LICENSE、部署说明、Compose/NGINX 模板及证书脚本的源码相对路径；实际运行部署命令使用 Docker 部署包的平铺布局。核对 manifest.json 和 SHA256SUMS。
 
 ## 升级和兼容
 

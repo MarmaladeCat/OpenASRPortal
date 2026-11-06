@@ -2,20 +2,28 @@
 set -e
 if [ "$1" = configure ]; then
     if ! getent passwd openasrportal >/dev/null; then
-        adduser --system --group --home /var/lib/openasrportal --no-create-home openasrportal
+        adduser --system --group --home /var/lib/openasr/portal --no-create-home openasrportal
     fi
-    install -d -o openasrportal -g openasrportal -m 0700 /var/lib/openasrportal
+    install -d -o root -g root -m 0755 /var/lib/openasr
+    install -d -o openasrportal -g openasrportal -m 0700 /var/lib/openasr/portal
     if [ -x /usr/lib/openasrportal/runtime/openasrportal-runtime ]; then
-        /usr/lib/openasrportal/runtime/openasrportal-runtime --configure-installation
+        /usr/lib/openasrportal/runtime/openasrportal-runtime --configure-installation --previous-version "${2:-}"
     else
-        /usr/bin/python3 /usr/lib/openasrportal/configure.py
+        /usr/bin/python3 /usr/lib/openasrportal/configure.py --previous-version "${2:-}"
     fi
-    chown root:openasrportal /etc/openasrportal/service.env
-    chmod 0640 /etc/openasrportal/service.env
+    chown -R openasrportal:openasrportal /var/lib/openasr/portal
+    chmod 0700 /var/lib/openasr/portal
+    chmod 0600 /var/lib/openasr/portal/service.env
     deb-systemd-helper unmask openasrportal.service >/dev/null || true
     deb-systemd-helper enable openasrportal.service >/dev/null || true
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
         deb-systemd-invoke restart openasrportal.service || true
+    fi
+    printf 'Portal administration: %s\n' "$(cat /usr/share/openasrportal/admin.url)"
+    if [ -z "${OPENASRPORTAL_NO_LAUNCH:-}" ] && [ "${DEBIAN_FRONTEND:-}" != noninteractive ] &&
+       [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] &&
+       { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
+        runuser -u "$SUDO_USER" -- /usr/bin/openasrportal --open-setup --url-file /usr/share/openasrportal/admin.url || true
     fi
 fi

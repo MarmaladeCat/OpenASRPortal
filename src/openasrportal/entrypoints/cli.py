@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from aiohttp import web
@@ -16,6 +17,16 @@ def application(args):
 
 
 def main():
+    if sys.argv[1:2] == ["--provision-local-input"]:
+        from .provision import main as provision
+
+        del sys.argv[1]
+        return provision()
+    if sys.argv[1:2] == ["--open-setup"]:
+        from .onboarding import main as onboarding
+
+        del sys.argv[1]
+        return onboarding()
     parser = argparse.ArgumentParser(description="OpenASRPortal independent speech service")
     parser.add_argument("--host", default=os.environ.get("OPENASRPORTAL_HOST", "127.0.0.1"))
     parser.add_argument("--ipv6", action="store_true", help="also bind all IPv6 interfaces")

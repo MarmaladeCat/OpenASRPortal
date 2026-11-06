@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+case "$1" in
+    install|upgrade)
+        if [ -L /var/lib/openasr ] || [ -L /var/lib/openasr/portal ]; then
+            echo 'Portal data directory must not be a symlink.' >&2
+            exit 1
+        fi
+        install -d -o root -g root -m 0755 /var/lib/openasr
+        install -d -m 0700 /var/lib/openasr/portal
+        printf '%s\n' "$1" > /var/lib/openasr/portal/pending-operation
+        if [ -d /run/systemd/system ] && systemctl is-active --quiet openasrportal.service; then
+            deb-systemd-invoke stop openasrportal.service
+        fi
+        ;;
+esac

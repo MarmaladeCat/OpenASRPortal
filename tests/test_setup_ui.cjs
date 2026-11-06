@@ -59,6 +59,7 @@ async function run() {
     if (level >= 3) errors.push(message);
   });
   await window.loadURL(ready.url + '/admin');
+  await require('./language_ui.cjs').language(window, 'zh-CN');
   assert.equal(new URL(window.webContents.getURL()).pathname, '/admin/setup');
   await wait('document.getElementById("setup-status").textContent.includes("请设置")');
   assert.equal(await js('document.getElementById("setup-pair-code")'), null);
@@ -79,6 +80,20 @@ async function run() {
     document.getElementById('setup-confirm').value='Different password 2026!';
     document.getElementById('setup-form').requestSubmit()`);
   await wait('document.getElementById("setup-status").textContent.includes("不一致")');
+  await require('./language_ui.cjs').language(window, 'en');
+  assert.equal(
+    await js('document.getElementById("setup-status").textContent'),
+    'The passwords do not match.'
+  );
+  assert.equal(
+    await js('document.getElementById("setup-password").value'),
+    'User defined password 2026!'
+  );
+  fs.writeFileSync(
+    path.join(results, 'first-run-english.png'),
+    (await window.webContents.capturePage()).toPNG()
+  );
+  await require('./language_ui.cjs').language(window, 'zh-CN');
   await js(`document.getElementById('setup-confirm').value='User defined password 2026!';
     document.getElementById('setup-form').requestSubmit()`);
   await wait(
@@ -95,6 +110,7 @@ async function run() {
     (await window.webContents.capturePage()).toPNG()
   );
   const oldToken = await js('sessionStorage.getItem("openasrportal-admin-session")');
+  await require('./language_ui.cjs').verifyLanguages(window);
   await js('document.getElementById("logout").click()');
   await wait('!document.getElementById("login").hidden');
   assert.equal(

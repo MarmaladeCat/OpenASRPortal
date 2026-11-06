@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.zh-CN.md)
 
-Version **1.0.0**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
+Version **1.0.1**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
 
 ## 1. Logical architecture
 
@@ -44,16 +44,16 @@ Input can follow default. Notes/Drafts 0.14.0 require explicit profile selection
 
 Windows normally uses native MSI service; Linux uses deb locally or Docker for container maintenance. Choose matching amd64/arm64 files; run one instance per port.
 
-Native packages include private Python; images include service runtimes, but neither includes cloud accounts or LocalASR models. Verify SHA256SUMS with Linux `sha256sum -c SHA256SUMS` or Windows `Get-FileHash -Algorithm SHA256 <file>`, comparing matching entries.
+Native packages include private Python; images include service runtimes, but neither includes cloud accounts or LocalASR models. Download each package's exact `filename.sha256` companion (one package per checksum file). Verify with Linux `sha256sum -c filename.sha256` or Windows `Get-FileHash -Algorithm SHA256 <file>`.
 
 ### 2.2 Windows service installation
 
-1. Run `OpenASRPortal_1.0.0_windows_amd64_native.msi` and authorize service installation.
+1. Run `OpenASRPortal_1.0.1_windows_amd64_native.msi` and authorize service installation.
 2. Open http://127.0.0.1:10087/admin. If occupied, identify the existing instance before initializing the wrong service.
 3. Complete password/upstream/client setup in §2.5.
 4. Check OpenASRPortal in Windows Services. Closing the browser does not stop it.
 
-Default data is `%ProgramData%\OpenASRPortal\data`; service configuration also lives under the product ProgramData directory. Program files/data are separate: copying Program Files alone is not a backup.
+Current-source default data is `%ProgramData%\OpenASR\Portal\data`, with `service.json` in its parent. Earlier packages use `%ProgramData%\OpenASRPortal`; see [installation lifecycle](installation.md) for migration, combined packages, and language selection. Copying Program Files alone is not a data backup.
 
 ![Real Portal management page on Windows](images/windows-admin.png)
 
@@ -64,12 +64,12 @@ Windows 11 amd64 service extracted from 1.0.0 MSI, with temporary data/demo prof
 In the download directory, substituting ARM64 when needed:
 
 ```bash
-sudo apt install ./OpenASRPortal_1.0.0_linux_amd64_local-service.deb
+sudo apt install ./OpenASRPortal_1.0.1_linux_amd64_local-service.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
 
-Open the same /admin URL. Data: /var/lib/openasrportal. Service listening/environment: /etc/openasrportal/service.env. Daily web administration needs no sudo; an administrator restarts openasrportal after environment changes.
+Open the same /admin URL. Current-source data is `/var/lib/openasr/portal/data`; service environment is `/var/lib/openasr/portal/service.env`. Earlier `/var/lib/openasrportal` and `/etc/openasrportal/service.env` defaults migrate on installation. Daily web administration needs no sudo; an administrator restarts openasrportal after environment changes.
 
 ![Real Portal management page on Linux](images/linux-admin.png)
 
@@ -77,7 +77,7 @@ Captured from version 1.0 source on Linux amd64, initialized with a demo LocalAS
 
 ### 2.4 Linux Docker bundle
 
-Extract `OpenASRPortal_1.0.0_linux_amd64_docker.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
+Extract `OpenASRPortal_1.0.1_linux_amd64_docker.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
 
 ```bash
 docker load -i image.tar
@@ -236,11 +236,11 @@ Do not delete the database. Use interactive recovery on the actual data host:
 
 ```powershell
 # Administrator PowerShell, default installation
-& "$env:ProgramFiles/OpenASRPortal/python/python.exe" -B -m openasrportal.entrypoints.admin --data-dir "$env:ProgramData/OpenASRPortal/data"
+& "$env:ProgramFiles/OpenASRPortal/python/python.exe" -B -m openasrportal.entrypoints.admin --data-dir "$env:ProgramData/OpenASR/Portal/data"
 ```
 
 ```bash
-sudo -u openasrportal /usr/bin/openasrportal --data-dir /var/lib/openasrportal --reset-admin-password
+sudo -u openasrportal /usr/bin/openasrportal --data-dir /var/lib/openasr/portal/data --reset-admin-password
 ```
 
 Source uses its own Python with `-m openasrportal.entrypoints.admin --data-dir <actual-directory>`. Recovery revokes management sessions while retaining profiles/ASR keys/business data. Never pass plaintext passwords as arguments.

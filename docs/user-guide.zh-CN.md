@@ -2,7 +2,7 @@
 
 [English](user-guide.md) | **简体中文**
 
-适用版本：**1.0.0**。本文面向安装服务、配置识别上游和管理客户端的用户。客户端开发见 [识别 API](API.zh-CN.md)，自动化管理见 [管理协议](MANAGEMENT.zh-CN.md)。项目采用 [GPL v3](../LICENSE)。
+适用版本：**1.0.1**。本文面向安装服务、配置识别上游和管理客户端的用户。客户端开发见 [识别 API](API.zh-CN.md)，自动化管理见 [管理协议](MANAGEMENT.zh-CN.md)。项目采用 [GPL v3](../LICENSE)。
 
 ## 1. 软件的逻辑架构
 
@@ -44,16 +44,16 @@ Input 可在界面选择跟随默认；Notes/Drafts 0.14.0 的界面需要显式
 
 Windows 常规使用原生 MSI 服务；Linux 单机可用 deb，需要容器化维护时选 Docker 镜像包。选择匹配的 amd64/arm64 文件，同一端口只运行一个实例。
 
-原生包携带私有 Python；Docker 镜像携带服务运行环境。它们都不携带云账号或 LocalASR 模型。下载后核对 `SHA256SUMS`；Linux 使用 `sha256sum -c SHA256SUMS`，Windows 使用 `Get-FileHash -Algorithm SHA256 <文件>` 对照同名条目。
+原生包携带私有 Python；Docker 镜像携带服务运行环境。它们都不携带云账号或 LocalASR 模型。同时下载每个安装包的同名 `文件名.sha256`，每份只含该包的校验记录；Linux 使用 `sha256sum -c 文件名.sha256`，Windows 使用 `Get-FileHash -Algorithm SHA256 <文件>` 对照记录。
 
 ### 2.2 Windows：安装系统服务
 
-1. 运行 `OpenASRPortal_1.0.0_windows_amd64_native.msi`，按向导授权安装服务。
+1. 运行 `OpenASRPortal_1.0.1_windows_amd64_native.msi`，按向导授权安装服务。
 2. 在浏览器打开 `http://127.0.0.1:10087/admin`。若端口已被占用，先确认是否已有 Portal 实例，避免初始化到错误服务。
 3. 完成第 2.5 节的首次密码、上游和客户端设置。
 4. 通过 Windows“服务”查看 OpenASRPortal 的运行状态。关闭浏览器不会停止服务。
 
-默认数据在 `%ProgramData%\OpenASRPortal\data`，服务配置在同一产品 ProgramData 目录；程序文件与用户数据分开，备份时不要只复制 Program Files。
+当前源码默认数据在 `%ProgramData%\OpenASR\Portal\data`，服务配置 `service.json` 在其父目录。旧安装包使用 `%ProgramData%\OpenASRPortal`，迁移、合体包和语言选择见 [安装生命周期](installation.zh-CN.md)。备份时不要只复制 Program Files。
 
 ![Windows 的真实 Portal 管理页](images/windows-admin.png)
 
@@ -64,12 +64,12 @@ Windows 常规使用原生 MSI 服务；Linux 单机可用 deb，需要容器化
 在下载目录执行，ARM64 替换为对应文件：
 
 ```bash
-sudo apt install ./OpenASRPortal_1.0.0_linux_amd64_local-service.deb
+sudo apt install ./OpenASRPortal_1.0.1_linux_amd64_local-service.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
 
-浏览器访问同一 `/admin` 地址。数据在 `/var/lib/openasrportal`，监听等服务环境配置在 `/etc/openasrportal/service.env`。日常管理在网页完成，不需要 sudo；修改服务环境后由管理员重启 `openasrportal` 服务。
+浏览器访问同一 `/admin` 地址。当前源码数据在 `/var/lib/openasr/portal/data`，服务环境配置在 `/var/lib/openasr/portal/service.env`；旧默认 `/var/lib/openasrportal` 与 `/etc/openasrportal/service.env` 安装时迁移。日常网页管理不需要 sudo，修改服务环境后由管理员重启 `openasrportal`。
 
 ![Linux 的真实 Portal 管理页](images/linux-admin.png)
 
@@ -77,7 +77,7 @@ curl http://127.0.0.1:10087/health
 
 ### 2.4 Linux：Docker 镜像包
 
-解压对应架构的 `OpenASRPortal_1.0.0_linux_amd64_docker.tar.gz`，进入包内 `OpenASRPortal` 目录：
+解压对应架构的 `OpenASRPortal_1.0.1_linux_amd64_docker.tar.gz`，进入包内 `OpenASRPortal` 目录：
 
 ```bash
 docker load -i image.tar
@@ -236,11 +236,11 @@ Portal 在容器中时 `127.0.0.1` 是它自己。连接同一 Docker 网络的 
 
 ```powershell
 # 管理员 PowerShell；默认安装位置
-& "$env:ProgramFiles/OpenASRPortal/python/python.exe" -B -m openasrportal.entrypoints.admin --data-dir "$env:ProgramData/OpenASRPortal/data"
+& "$env:ProgramFiles/OpenASRPortal/python/python.exe" -B -m openasrportal.entrypoints.admin --data-dir "$env:ProgramData/OpenASR/Portal/data"
 ```
 
 ```bash
-sudo -u openasrportal /usr/bin/openasrportal --data-dir /var/lib/openasrportal --reset-admin-password
+sudo -u openasrportal /usr/bin/openasrportal --data-dir /var/lib/openasr/portal/data --reset-admin-password
 ```
 
 源码环境使用自身 Python 的 `-m openasrportal.entrypoints.admin --data-dir <实际目录>`。恢复撤销管理会话，保留档案、识别 Key 和业务数据；密码不作为命令行明文参数。

@@ -1,5 +1,6 @@
 // 纯浏览器管理页：只调用 Management v1，提供商表单来自协议描述。
 import { PersonalHotwords, wordIdentity } from './personal-hotwords.mjs';
+import { userOption, userText } from './i18n.mjs';
 
 const byId = (id) => document.getElementById(id);
 let credential = sessionStorage.getItem('openasrportal-admin-session') || '',
@@ -148,7 +149,7 @@ function fillUsageFilters() {
       selected = select.value;
     select.replaceChildren(
       new Option(title, ''),
-      ...items.map((item) => new Option(item.title, item.id))
+      ...items.map((item) => userOption(item.title, item.id))
     );
     select.value = selected;
   }
@@ -183,6 +184,7 @@ function usageTable(containerId, rows, firstTitle, name) {
     ]) {
       const cell = document.createElement('td');
       cell.textContent = value;
+      if (!tr.children.length) cell.translate = false;
       tr.append(cell);
     }
     body.append(tr);
@@ -406,6 +408,7 @@ async function refreshKeys() {
     row.className = 'key-row';
     const title = document.createElement('h3');
     title.textContent = key.title;
+    title.translate = false;
     const badge = document.createElement('span');
     badge.className = 'key-state' + (key.revoked ? ' revoked' : '');
     badge.textContent = key.revoked
@@ -505,7 +508,7 @@ async function refreshPublicDictionaries() {
       new Option('选择联网来源', ''),
       ...catalog.sources
         .filter((source) => source.kind === 'external')
-        .map((source) => new Option(source.title, source.id))
+        .map((source) => userOption(source.title, source.id))
     );
     byId('public-list').replaceChildren();
     for (const dictionary of listing.dictionaries) {
@@ -513,9 +516,17 @@ async function refreshPublicDictionaries() {
       card.className = 'profile';
       card.dataset.id = dictionary.id;
       const title = document.createElement('h3');
-      title.textContent = `${dictionary.title} · ${dictionary.wordCount} 词 · ${dictionary.enabled ? '已发布' : '未发布'}`;
+      title.append(
+        userText(dictionary.title),
+        ` · ${dictionary.wordCount} 词 · ${dictionary.enabled ? '已发布' : '未发布'}`
+      );
       const detail = document.createElement('p');
-      detail.textContent = `${dictionary.description || '无说明'} · 版本 ${dictionary.revision} · ${dictionary.license || '未填写来源'} · ${new Date(dictionary.updatedAt * 1000).toLocaleString()}`;
+      detail.append(
+        dictionary.description ? userText(dictionary.description) : '无说明',
+        ` · 版本 ${dictionary.revision} · `,
+        dictionary.license ? userText(dictionary.license) : '未填写来源',
+        ' · ' + new Date(dictionary.updatedAt * 1000).toLocaleString()
+      );
       const view = document.createElement('button');
       view.className = 'public-open';
       view.textContent = '查看 / 修改';
@@ -581,7 +592,7 @@ function renderPublicWords() {
   byId('public-words').replaceChildren();
   for (const word of words.slice(publicPage * 50, (publicPage + 1) * 50)) {
     const row = document.createElement('p');
-    row.textContent = `${word.text} · 权重 ${word.weight} · 来源词频 ${word.frequency}`;
+    row.append(userText(word.text), ` · 权重 ${word.weight} · 来源词频 ${word.frequency}`);
     byId('public-words').append(row);
   }
   byId('public-prev').disabled = publicBusy || publicPage === 0;
@@ -767,7 +778,7 @@ async function openKeyHotwords(key) {
     keyRecommendationWords = [];
     keyRecommendationPage = 0;
     byId('key-dictionary-search').value = '';
-    byId('key-hotwords-title').textContent = `${key.title} · 用户热词表`;
+    byId('key-hotwords-title').replaceChildren(userText(key.title), ' · 用户热词表');
     byId('key-hotwords').hidden = false;
     byId('key-dictionary-report').textContent = '';
     byId('key-dictionary-source-note').textContent = '';
@@ -775,7 +786,7 @@ async function openKeyHotwords(key) {
       new Option('选择公共推荐表', ''),
       ...catalog.sources
         .filter((source) => source.kind === 'portal-public')
-        .map((source) => new Option(source.title, source.id))
+        .map((source) => userOption(source.title, source.id))
     );
     renderKeyHotwords(value);
     byId('key-hotwords').scrollIntoView({ behavior: 'smooth' });
@@ -798,7 +809,10 @@ function renderKeyRecommendations() {
     row.dataset.word = term.text;
     const label = document.createElement('span');
     const enabled = selected.has(wordIdentity(term.text));
-    label.textContent = `${term.text} · 权重 ${term.weight || 4} · ${enabled ? '已在热词表中' : '候选词'}`;
+    label.append(
+      userText(term.text),
+      ` · 权重 ${term.weight || 4} · ${enabled ? '已在热词表中' : '候选词'}`
+    );
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.textContent = enabled ? '已加入' : '加入热词表';
@@ -874,8 +888,10 @@ async function loadKeyRecommendations(sourceId) {
     });
     if (identity !== keyHotwordId) return;
     showKeyRecommendations(result);
-    byId('key-dictionary-report').textContent =
-      `${result.source.title} · ${reportDictionary(result.report)}`;
+    byId('key-dictionary-report').replaceChildren(
+      userText(result.source.title),
+      ` · ${reportDictionary(result.report)}`
+    );
     status('推荐表已载入候选区，点击“加入热词表”后保存生效。');
   } catch (error) {
     status(error.message, true);
@@ -903,7 +919,7 @@ byId('key-hotwords-refresh').onclick = action(async () => {
         new Option('选择公共推荐表', ''),
         ...catalog.sources
           .filter((source) => source.kind === 'portal-public')
-          .map((source) => new Option(source.title, source.id))
+          .map((source) => userOption(source.title, source.id))
       );
       if (catalog.sources.some((source) => source.id === previous))
         byId('key-dictionary-source').value = previous;
@@ -954,6 +970,7 @@ byId('key-dictionary-source').onchange = () => {
   byId('key-dictionary-source-note').textContent = source
     ? `${source.description} · ${source.license}`
     : '';
+  byId('key-dictionary-source-note').translate = false;
 };
 byId('key-dictionary-online').onclick = () => {
   const sourceId = byId('key-dictionary-source').value;
@@ -975,11 +992,16 @@ function render() {
     card.className = 'profile';
     card.dataset.id = profile.id;
     const title = document.createElement('h3');
-    title.textContent = profile.title;
+    title.append(userText(profile.title));
     if (profile.quota)
-      title.textContent = `${position + 1}. ${profile.title} · ${profile.quota.enabled ? '启用' : profile.quota.disabledReason === 'manual' ? '手动停用' : '额度 / 计量停用'}`;
+      title.replaceChildren(
+        `${position + 1}. `,
+        userText(profile.title),
+        ` · ${profile.quota.enabled ? '启用' : profile.quota.disabledReason === 'manual' ? '手动停用' : '额度 / 计量停用'}`
+      );
     const detail = document.createElement('p');
     detail.textContent = `${profile.id} · ${profile.provider} · ${profile.configuration.endpoint || ''}`;
+    detail.translate = false;
     const actions = document.createElement('div');
     actions.className = 'actions';
     const button = (label, callback, className) => {

@@ -78,7 +78,7 @@ def build(output, python, runtime_dir=None):
             f"Depends: {depends}, adduser, init-system-helpers\n"
             "Description: OpenASRPortal independent HTTP/WebSocket speech service\n"
         )
-        for name in ("postinst", "prerm", "postrm"):
+        for name in ("preinst", "postinst", "prerm", "postrm"):
             shutil.copy2(ROOT / "packaging" / name, control / name)
             (control / name).chmod(0o755)
         if not runtime_dir:

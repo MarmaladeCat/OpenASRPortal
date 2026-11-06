@@ -6,6 +6,8 @@ Source uses Python 3.10+, aiohttp, and product-owned SQLite, without Electron/mo
 
 ## Local development
 
+See [installation lifecycle](installation.md) for current-source directories and migration. `openasrportal --provision-local-input --installed --client-id ID --output FILE` is an installation-owner command; stop the service and protect its output for the recipient. `openasrportal --open-setup --url-file FILE` uses public authentication status before opening a browser. The bundle composer obtains current provenance with `python scripts/release.py --source-digest`. Translation catalogs are owned by this product; UI tests cover setup and administration in both languages without losing drafts or translating user data.
+
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
@@ -36,7 +38,7 @@ python scripts/build.py --deployment windows --arch amd64 --wix-bin <WiX-directo
 
 debs use Ubuntu 22.04 / PyInstaller 6.16.0; images use Python 3.12.10 / Debian 12. MSI orchestration uses native Windows Python 3.12.10 and WiX 3.14.1; bundled private Python is 3.13.16, service wrapper WinSW 2.12.0. packaging/ recipes call build_portable_deb.py, build_image.py, or build_windows.py without workspace source dependencies.
 
-Candidates: `.cache/build/artifacts/<os>/<arch>/<variant>/`. Publish to `release/1.0.0/`; VERSION/package metadata are 1.0.0. Flat output contains debs, image bundles, MSI, bilingual docs ZIP/READMEs, manifest.json, SHA256SUMS. Docker bundles contain real image.tar and authored deployment instructions, never dist/ output.
+Candidates: `.cache/build/artifacts/<os>/<arch>/<variant>/`. Publish to `release/1.0.1/`; VERSION/package metadata are 1.0.1. Flat output contains debs, image bundles, MSI, bilingual docs ZIP/READMEs, manifest.json, SHA256SUMS. Docker bundles contain real image.tar and authored deployment instructions, never dist/ output.
 
 Publication verifies provenance, unique candidates, version, architecture, and hashes before replacement; matching-source other-platform artifacts merge. Building is not service installation/upgrade/uninstallation or real-recognition acceptance. Store records in test-results/.
 
