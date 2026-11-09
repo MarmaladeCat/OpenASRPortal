@@ -29,6 +29,8 @@ Add UI for web changes; adapter changes cover revisions, metering, end/cancel, a
 
 ## Pinned builds
 
+Public package filenames are `OpenASRPortal_<version>_<os>_<architecture>.<extension>`, including Docker `.tar.gz` packages. GitHub Release attachments contain only packages and their exact `.sha256` companions; authored notes and documentation links go in the release body. Local release directories retain documentation and provenance records.
+
 ```bash
 python scripts/build.py --deployment local --arch amd64
 python scripts/build.py --deployment docker --arch amd64

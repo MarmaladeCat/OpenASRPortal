@@ -4,6 +4,8 @@
 
 Version **1.0.1**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
 
+For service activation, API keys, and matching Portal settings, see the separate [Doubao Speech](doubao-api-setup.md) and [Alibaba Cloud Model Studio](bailian-api-setup.md) setup guides.
+
 ## 1. Logical architecture
 
 ### 1.1 Portal's position
@@ -48,7 +50,7 @@ Native packages include private Python; images include service runtimes, but nei
 
 ### 2.2 Windows service installation
 
-1. Run `OpenASRPortal_1.0.1_windows_amd64_native.msi` and authorize service installation.
+1. Run `OpenASRPortal_1.0.1_windows_amd64.msi` and authorize service installation.
 2. Open http://127.0.0.1:10087/admin. If occupied, identify the existing instance before initializing the wrong service.
 3. Complete password/upstream/client setup in §2.5.
 4. Check OpenASRPortal in Windows Services. Closing the browser does not stop it.
@@ -64,7 +66,7 @@ Windows 11 amd64 service extracted from 1.0.0 MSI, with temporary data/demo prof
 In the download directory, substituting ARM64 when needed:
 
 ```bash
-sudo apt install ./OpenASRPortal_1.0.1_linux_amd64_local-service.deb
+sudo apt install ./OpenASRPortal_1.0.1_linux_amd64.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
@@ -77,7 +79,7 @@ Captured from version 1.0 source on Linux amd64, initialized with a demo LocalAS
 
 ### 2.4 Linux Docker bundle
 
-Extract `OpenASRPortal_1.0.1_linux_amd64_docker.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
+Extract `OpenASRPortal_1.0.1_linux_amd64.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
 
 ```bash
 docker load -i image.tar

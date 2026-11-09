@@ -18,9 +18,9 @@
 
 ## 下载与文档
 
-Linux deb 为 `*_local-service.deb`，镜像包为 `*_docker.tar.gz`，Windows 为 `*_native.msi`；按 amd64/arm64 选择。独立安装不自动配置录音客户端。
+软件包使用 `OpenASRPortal_1.0.1_<系统>_<架构>.<后缀>`：Linux 服务为 `.deb`，Docker 部署为 `.tar.gz`，Windows 为 `.msi`；按 amd64/arm64 选择。独立安装不自动配置录音客户端。
 
-完整人工文档在 `OpenASRPortal_1.0.1_docs.zip`，解压后从 README.md 阅读，用户操作在 docs/user-guide.md，客户端协议在 docs/API.md，管理对接在 docs/MANAGEMENT.md。归档还保留 LICENSE、部署说明、Compose/NGINX 模板及证书脚本的源码相对路径；实际运行部署命令使用 Docker 部署包的平铺布局。核对 manifest.json 和 SHA256SUMS。
+GitHub Release 附件只保留软件包及各自的 `.sha256`。在线阅读[使用手册](user-guide.zh-CN.md)、[客户端协议](API.zh-CN.md)和[管理协议](MANAGEMENT.zh-CN.md)。本地构建目录保留文档归档、manifest.json 和 SHA256SUMS。Docker 部署包包含镜像及部署材料，实际运行部署命令使用包内平铺布局。
 
 ## 升级和兼容
 

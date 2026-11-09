@@ -50,6 +50,8 @@ deb 使用 Ubuntu 22.04 / PyInstaller 6.16.0；镜像使用 Python 3.12.10 / Deb
 
 ## 文档与 Git
 
+公开软件包命名为 `OpenASRPortal_<版本>_<系统>_<架构>.<后缀>`，Docker 部署包也采用该格式，以 `.tar.gz` 结尾。GitHub Release 附件只上传软件包及对应的 `.sha256`，人工版本说明及文档链接放正文。本地发行目录保留文档与来源记录。
+
 单独预览文档时，先创建 `test-results/`，再运行 `python scripts/release.py --docs test-results/product-docs.zip`。全部人工 Markdown、图片和链接附件保留原始字节与相对目录。平铺发行目录在相同内容的 README 副本旁保留 `release.md` / `release.zh-CN.md`，确保语言链接有效。
 
 docs/ 人工维护：用户操作、客户端/管理协议、架构、开发发布、测试约束、版本说明。`docs/release.md` 同时作为发行目录 README 的原文，文档 ZIP 原样保存目录和截图。自动报告、清单和校验和是机器证据，不替代人工说明。

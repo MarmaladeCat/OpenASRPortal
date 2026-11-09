@@ -9,6 +9,7 @@
 For system-wide dictation, use [OpenASRInput](https://github.com/MarmaladeCat/OpenASRInput). Its [downloads](https://github.com/MarmaladeCat/OpenASRInput/releases) are also the distribution point for Input + Portal combined installers. See [installation lifecycle and language selection](docs/installation.md); the new combined candidates are pending review.
 
 - **Deploy and operate:** [Windows / Linux user guide](docs/user-guide.md).
+- **Cloud API setup:** [Doubao Speech](docs/doubao-api-setup.md) and [Alibaba Cloud Model Studio](docs/bailian-api-setup.md): activate services, create keys, and connect them to Portal.
 - **Client development:** [recognition and personal hotwords API v1](docs/API.md).
 - **Management tools:** [management protocol v1](docs/MANAGEMENT.md), including authentication, public dictionaries, and metering.
 - **Implementation:** [architecture](docs/architecture.md).

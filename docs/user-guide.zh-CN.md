@@ -4,6 +4,8 @@
 
 适用版本：**1.0.1**。本文面向安装服务、配置识别上游和管理客户端的用户。客户端开发见 [识别 API](API.zh-CN.md)，自动化管理见 [管理协议](MANAGEMENT.zh-CN.md)。项目采用 [GPL v3](../LICENSE)。
 
+服务开通、API Key 获取及对应的 Portal 填写步骤分别见 [豆包语音 API 开通指南](doubao-api-setup.zh-CN.md)和 [阿里云百炼 API 开通指南](bailian-api-setup.zh-CN.md)。
+
 ## 1. 软件的逻辑架构
 
 ### 1.1 Portal 在系统中的位置
@@ -48,7 +50,7 @@ Windows 常规使用原生 MSI 服务；Linux 单机可用 deb，需要容器化
 
 ### 2.2 Windows：安装系统服务
 
-1. 运行 `OpenASRPortal_1.0.1_windows_amd64_native.msi`，按向导授权安装服务。
+1. 运行 `OpenASRPortal_1.0.1_windows_amd64.msi`，按向导授权安装服务。
 2. 在浏览器打开 `http://127.0.0.1:10087/admin`。若端口已被占用，先确认是否已有 Portal 实例，避免初始化到错误服务。
 3. 完成第 2.5 节的首次密码、上游和客户端设置。
 4. 通过 Windows“服务”查看 OpenASRPortal 的运行状态。关闭浏览器不会停止服务。
@@ -64,7 +66,7 @@ Windows 常规使用原生 MSI 服务；Linux 单机可用 deb，需要容器化
 在下载目录执行，ARM64 替换为对应文件：
 
 ```bash
-sudo apt install ./OpenASRPortal_1.0.1_linux_amd64_local-service.deb
+sudo apt install ./OpenASRPortal_1.0.1_linux_amd64.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
@@ -77,7 +79,7 @@ curl http://127.0.0.1:10087/health
 
 ### 2.4 Linux：Docker 镜像包
 
-解压对应架构的 `OpenASRPortal_1.0.1_linux_amd64_docker.tar.gz`，进入包内 `OpenASRPortal` 目录：
+解压对应架构的 `OpenASRPortal_1.0.1_linux_amd64.tar.gz`，进入包内 `OpenASRPortal` 目录：
 
 ```bash
 docker load -i image.tar

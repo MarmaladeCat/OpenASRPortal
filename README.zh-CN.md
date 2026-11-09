@@ -9,6 +9,7 @@
 系统语音输入请配合 [OpenASRInput](https://github.com/MarmaladeCat/OpenASRInput) 使用；其 [下载页](https://github.com/MarmaladeCat/OpenASRInput/releases) 也是 Input + Portal 合体安装包的分发入口。详见 [安装生命周期与语言选择](docs/installation.zh-CN.md)，新合体候选目前待审核。
 
 - **部署和操作**：[Windows / Linux 使用手册](docs/user-guide.zh-CN.md)。
+- **云端 API 开通**：[豆包语音](docs/doubao-api-setup.zh-CN.md)、[阿里云百炼](docs/bailian-api-setup.zh-CN.md)，开通服务、创建 Key 并接入 Portal。
 - **客户端开发**：[识别与个人热词 API v1](docs/API.zh-CN.md)。
 - **管理工具开发**：[管理协议 v1](docs/MANAGEMENT.zh-CN.md)，包含认证、公共词表和用量计量。
 - **内部实现**：[架构设计](docs/architecture.zh-CN.md)。
