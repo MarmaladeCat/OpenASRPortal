@@ -47,7 +47,7 @@ class ManagementTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             {provider["id"] for provider in descriptor["providers"]},
-            {"openlocalasr", "doubao_realtime", "bailian_qwen_asr"},
+            {"openlocalasr", "doubao_realtime", "bailian_qwen_asr", "boson_realtime", "soniox_realtime"},
         )
         body = {
             "id": "local",
@@ -96,6 +96,23 @@ class ManagementTests(unittest.IsolatedAsyncioTestCase):
             (await self.request("PATCH", "/v1/admin/settings", {"defaultProfileId": "missing"}))[0],
             400,
         )
+
+    async def test_proxy_admin_only_and_per_profile_selection(self):
+        payload = {"proxy": {"url": "http://proxy.example:8080", "username": "test-user",
+                             "password": "fictional-proxy-secret"}}
+        self.assertEqual((await self.request("PATCH", "/v1/admin/settings", payload,
+                                            key="client-key"))[0], 401)
+        code, settings = await self.request("PATCH", "/v1/admin/settings", payload)
+        self.assertEqual(code, 200)
+        self.assertEqual(settings["proxy"], {"url": payload["proxy"]["url"], "hasCredentials": True})
+        self.assertNotIn("proxy", (await self.request("GET", "/v1/profiles", key="client-key"))[1])
+        for use_proxy in (True, False):
+            self.store.save("local", "Local", "openlocalasr", {"apiKey": "key", "useProxy": use_proxy})
+            provider = self.portal.factory(self.store.get("local"))
+            self.assertEqual(provider.config["useProxy"], use_proxy)
+            self.assertEqual(provider.config["_proxy"], payload["proxy"] if use_proxy else None)
+        for route in ("/v1/admin/settings", "/v1/admin/profiles", "/v1/admin/profiles/local"):
+            self.assertNotIn("fictional-proxy-secret", json.dumps((await self.request("GET", route))[1]))
 
     async def test_same_endpoint_profiles_keep_independent_keys_and_sessions(self):
         for identity, key in (("doubao-1", "key-1"), ("doubao-2", "key-2")):

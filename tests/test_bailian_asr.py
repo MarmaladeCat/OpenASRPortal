@@ -1,263 +1,135 @@
-"""远程百炼 HTTP 请求、VAD、预览/定稿调度与资源清理；完全离线测试。"""
+"""Offline duplex wire tests; no simulated HTTP recognition implementation."""
 
 import asyncio
-import base64
-import io
 import json
-import struct
+import tempfile
 import unittest
-import wave
+from pathlib import Path
+from unittest.mock import patch
 
-try:
-    import httpx
-except ImportError:
-    raise unittest.SkipTest("百炼测试需要 httpx==0.28.1")
+from websockets.exceptions import ConnectionClosedOK
+from websockets.legacy.server import serve
 
 from openasrportal.domain.asr_protocol import ProviderError
-from openasrportal.domain.config import (
-    BAILIAN_ASR_MODEL,
-    BAILIAN_MODEL,
-    public_config,
-    validate_config,
-)
-from openasrportal.providers.bailian_asr import MAX_SEGMENT_BYTES, BailianProvider, parse_result
+from openasrportal.domain.config import BAILIAN_ASR_MODEL, BAILIAN_MODEL, validate_config
+from openasrportal.providers.bailian_asr import BailianProvider
+from openasrportal.storage.store import Store
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def voice(milliseconds):
-    return struct.pack("<h", 1500) * (16 * milliseconds)
-
-
-def config(**patches):
-    return validate_config(BAILIAN_MODEL, {"apiKey": "bailian-unit-secret", **patches})
-
-
-class ConfigAndResultTests(unittest.TestCase):
-    def test_provider_specific_validation_and_redaction(self):
-        for host in (
-            "dashscope.aliyuncs.com",
-            "dashscope-intl.aliyuncs.com",
-            "workspace-123.cn-beijing.maas.aliyuncs.com",
-            "ws-test.ap-southeast-1.maas.aliyuncs.com",
-        ):
-            endpoint = "https://" + host + "/api/v1/services/aigc/multimodal-generation/generation"
-            stored = config(endpoint=endpoint)
-            view = public_config(stored, BAILIAN_MODEL)
-            self.assertEqual(view["model"], BAILIAN_ASR_MODEL)
-            self.assertNotIn("resourceId", view)
-            self.assertNotIn("bailian-unit-secret", json.dumps(view))
-        for patch_value in (
-            {"endpoint": "https://example.com"},
-            {"endpoint": "https://dashscope.aliyuncs.com.evil.test"},
-            {"endpoint": "http://dashscope.aliyuncs.com"},
-            {"model": "qwen3-asr-flash"},
-            {"previewIntervalMs": True},
-            {"silenceMs": 0},
-            {"language": "unknown"},
-            {"keepDialect": "yes"},
-        ):
-            with self.subTest(patch=patch_value), self.assertRaises(ValueError):
-                config(**patch_value)
-
-    def test_cumulative_text_and_documented_nested_response(self):
-        self.assertEqual(
-            parse_result(
-                {"output": {"text": "第一句。第二句。", "sentence": {"text": "第二句。"}}}
-            ),
-            "第一句。第二句。",
-        )
-        self.assertEqual(
-            parse_result({"output": {"output": {"sentence": {"text": "你好。"}}}}), "你好。"
-        )
-        self.assertEqual(
-            parse_result({"output": {"sentences": [{"text": "甲。"}, {"text": "乙。"}]}}),
-            "甲。乙。",
-        )
-        self.assertEqual(parse_result({"output": {"text": ""}}), "")
-        for payload in ({"output": {}}, {"code": "InvalidApiKey"}, []):
-            with self.assertRaises(ProviderError):
-                parse_result(payload)
-
-    def test_workspace_base_urls_normalize_to_the_dashscope_request_path(self):
-        origin = "https://ws-th85oh8r45aiki7v.cn-beijing.maas.aliyuncs.com"
-        expected = origin + "/api/v1/services/aigc/multimodal-generation/generation"
-        for endpoint in (origin, origin + "/", origin + "/api/v1", origin + "/api/v1/", expected):
-            self.assertEqual(config(endpoint=endpoint)["endpoint"], expected)
-        for suffix in ("/compatible-mode/v1", "/api/v1?key=x", "/api/v1#fragment"):
+class ConfigTests(unittest.TestCase):
+    def test_official_domains_and_reject_http_or_wrong_model(self):
+        for host in ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com",
+                     "workspace.cn-beijing.maas.aliyuncs.com", "workspace.ap-southeast-1.maas.aliyuncs.com"):
+            value = validate_config(BAILIAN_MODEL, {"apiKey": "fictional", "endpoint": "wss://" + host})
+            self.assertEqual(value["endpoint"], "wss://" + host + "/api-ws/v1/inference")
+        for change in ({"endpoint": "https://dashscope.aliyuncs.com"},
+                       {"endpoint": "wss://dashscope.aliyuncs.com.evil.org"},
+                       {"endpoint": "wss://key@dashscope.aliyuncs.com"},
+                       {"model": "qwen-audio-3.1-asr-flash"}, {"silenceMs": True}):
             with self.assertRaises(ValueError):
-                config(endpoint=origin + suffix)
+                validate_config(BAILIAN_MODEL, {"apiKey": "fictional", **change})
+
+    def test_stored_http_profile_migrates_without_losing_key_region_or_quota(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "test-results") as directory:
+            store = Store(directory)
+            store.save("old", "Old", BAILIAN_MODEL, {"apiKey": "fictional"})
+            old = {"apiKey": "retained", "model": "qwen-audio-3.1-asr-flash",
+                   "endpoint": "https://workspace.ap-southeast-1.maas.aliyuncs.com/api/v1",
+                   "previewIntervalMs": 2500, "silenceMs": 1200}
+            with store.connection() as db:
+                db.execute("UPDATE profiles SET configuration=? WHERE id='old'", (json.dumps(old),))
+            store.usage.update_quota("profile", "old", {"remainingTokens": 123})
+            profile = store.get("old")
+            self.assertEqual(profile["configuration"]["model"], BAILIAN_ASR_MODEL)
+            self.assertEqual(profile["configuration"]["apiKey"], "retained")
+            self.assertNotIn("previewIntervalMs", profile["configuration"])
+            public = store.save("old", "Old", BAILIAN_MODEL, {})
+            self.assertEqual(public["quota"]["remainingTokens"], 123)
+            self.assertNotIn("retained", json.dumps(public))
+            self.assertEqual(public["capabilities"]["latencyClass"], "streaming")
 
 
-class ProviderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_request_uses_exact_model_and_pcm_wav_without_redirects(self):
-        seen = []
-
-        def handler(request):
-            seen.append(request)
-            body = json.loads(request.content)
-            self.assertEqual(body["model"], BAILIAN_ASR_MODEL)
-            self.assertEqual(request.headers["Authorization"], "Bearer bailian-unit-secret")
-            self.assertEqual(request.headers["X-DashScope-SSE"], "disable")
-            self.assertEqual(body["parameters"]["language_hints"], ["zh"])
-            self.assertTrue(body["parameters"]["keep_dialect"])
-            uri = body["input"]["messages"][0]["content"][0]["input_audio"]["data"]
-            with wave.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])), "rb") as wav:
-                self.assertEqual(
-                    (wav.getnchannels(), wav.getframerate(), wav.getsampwidth()), (1, 16000, 2)
-                )
-                self.assertEqual(wav.readframes(wav.getnframes()), voice(1000))
-            return httpx.Response(
-                200, json={"output": {"output": {"sentence": {"text": "嗯，这个这个不改。"}}}}
-            )
-
-        provider = BailianProvider(config(language="zh", keepDialect=True))
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            provider.client = client
-            self.assertEqual(await provider._transcribe(voice(1000)), "嗯，这个这个不改。")
-        self.assertEqual(len(seen), 1)
-
-    async def test_errors_and_malformed_results_are_not_success(self):
-        for response in (
-            httpx.Response(401, json={"code": "InvalidApiKey", "message": "bailian-unit-secret"}),
-            httpx.Response(307, headers={"Location": "https://example.com"}),
-            httpx.Response(200, text="bad json"),
-            httpx.Response(200, json={"output": {}}),
-        ):
-            provider = BailianProvider(config())
-            async with httpx.AsyncClient(
-                transport=httpx.MockTransport(lambda _: response), follow_redirects=False
-            ) as client:
-                provider.client = client
-                with self.assertRaises(ProviderError) as error:
-                    await provider._transcribe(voice(1000))
-                self.assertNotIn("bailian-unit-secret", str(error.exception))
-
-    async def test_official_no_words_response_is_empty_but_other_400_is_error(self):
-        provider = BailianProvider(config())
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda _: httpx.Response(
-                    400, json={"code": "CLIENT_ERROR", "message": "ASR_RESPONSE_HAVE_NO_WORDS"}
-                )
-            )
-        ) as client:
-            provider.client = client
-            self.assertEqual(await provider._transcribe(bytes(32000)), "")
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda _: httpx.Response(
-                    400, json={"code": "CLIENT_ERROR", "message": "invalid audio"}
-                )
-            )
-        ) as client:
-            provider.client = client
-            with self.assertRaises(ProviderError):
-                await provider._transcribe(bytes(32000))
-
-    async def test_stale_preview_is_discarded_and_final_order_preserved(self):
-        provider = BailianProvider(config(previewIntervalMs=1500, silenceMs=600))
-        started, release = asyncio.Event(), asyncio.Event()
-        calls = []
-
-        async def transcribe(pcm, *, final=True):
-            calls.append(pcm)
-            if len(calls) == 1:
-                started.set()
-                await release.wait()
-                return "过期预览"
-            return "第一段。" if len(calls) == 2 else "第二段。"
-
-        provider._transcribe = transcribe
-        await provider.open()
-        try:
-            await provider.send_audio(voice(1600))
-            await asyncio.wait_for(started.wait(), 1)
-            await provider.send_audio(bytes(19200))
-            await provider.send_audio(voice(900), last=True)
-            release.set()
-            events = []
-            while True:
-                batch, last = await asyncio.wait_for(provider.receive(), 1)
-                events.extend(batch)
-                if last:
-                    break
-            self.assertEqual([e["type"] for e in events], ["final_result", "final_result"])
-            self.assertEqual([e["nbest"][0]["sentence"] for e in events], ["第一段。", "第二段。"])
-            self.assertLess(
-                events[0]["nbest"][0]["word_pieces"][0]["end"],
-                events[1]["nbest"][0]["word_pieces"][0]["start"],
-            )
-        finally:
-            await provider.close()
-
-    async def test_preview_then_corrected_final_and_silence_filter(self):
-        provider = BailianProvider(config(previewIntervalMs=1500))
-        calls = []
-
-        async def transcribe(pcm, *, final=True):
-            calls.append(pcm)
-            return "错词" if len(calls) == 1 else "正确文本。"
-
-        provider._transcribe = transcribe
-        await provider.open()
-        try:
-            await provider.send_audio(bytes(32000))
-            self.assertEqual(calls, [])
-            await provider.send_audio(voice(1600))
-            events, last = await asyncio.wait_for(provider.receive(), 1)
-            self.assertFalse(last)
-            self.assertEqual(events[0]["type"], "partial_result")
-            await provider.send_audio(voice(400), last=True)
-            events, last = await asyncio.wait_for(provider.receive(), 1)
-            self.assertEqual(events[0]["nbest"][0]["sentence"], "正确文本。")
-            self.assertEqual(events[0]["type"], "final_result")
-            self.assertEqual(await provider.receive(), ([], True))
-            self.assertEqual(len(calls), 2)
-        finally:
-            await provider.close()
-
-    async def test_silence_only_session_and_probe_are_distinct(self):
-        provider = BailianProvider(config())
-        called = []
-
-        async def transcribe(pcm, *, final=True):
-            called.append(len(pcm))
-            return ""
-
-        provider._transcribe = transcribe
-        await provider.open()
-        try:
-            await provider.probe()
-            self.assertEqual(called, [32000])
-            await provider.send_audio(bytes(64000), last=True)
-            self.assertEqual(await asyncio.wait_for(provider.receive(), 1), ([], True))
-            self.assertEqual(called, [32000])
-        finally:
-            await provider.close()
-
-    async def test_close_cancels_inflight_request_and_limits_buffering(self):
-        provider = BailianProvider(config(previewIntervalMs=1500, silenceMs=600))
-        started, cancelled = asyncio.Event(), asyncio.Event()
-
-        async def transcribe(pcm, *, final=True):
-            started.set()
+class WireTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.audio = []
+        self.commands = []
+        self.bad = None
+        async def handle(ws):
+            self.assertEqual(ws.request_headers["Authorization"], "Bearer fictional")
+            command = json.loads(await ws.recv())
+            self.commands.append(command)
+            self.task = command["header"]["task_id"]
+            async def event(kind, payload):
+                await ws.send(json.dumps({"header": {"event": kind, "task_id": self.task}, "payload": payload}))
+            await event("task-started", {})
             try:
-                await asyncio.Future()
-            finally:
-                cancelled.set()
+                async for message in ws:
+                    if isinstance(message, bytes):
+                        self.audio.append(message)
+                        if self.bad:
+                            await ws.send(self.bad)
+                        else:
+                            await event("result-generated", {"output": {"sentence": {
+                                "sentence_id": 0, "text": "预览", "begin_time": 0,
+                                "end_time": None, "sentence_end": False}}})
+                    else:
+                        self.commands.append(json.loads(message))
+                        sentence = {"sentence_id": 0, "text": "定稿。", "begin_time": 0,
+                                    "end_time": 200, "sentence_end": True}
+                        for _ in range(2):
+                            await event("result-generated", {"output": {"sentence": sentence},
+                                                               "usage": {"total_tokens": 5}})
+                        await event("task-finished", {"usage": {"total_tokens": 7}})
+            except ConnectionClosedOK:
+                pass
+        self.server = await serve(handle, "127.0.0.1", 0)
+        config = validate_config(BAILIAN_MODEL, {"apiKey": "fictional", "language": "zh"})
+        config["endpoint"] = f"ws://127.0.0.1:{self.server.sockets[0].getsockname()[1]}"
+        config["hotwords"] = [{"text": "麒麟", "weight": 3}]
+        self.provider = BailianProvider(config)
+        await self.provider.open()
 
-        provider._transcribe = transcribe
-        await provider.open()
-        try:
-            await provider.send_audio(voice(1600))
-            await asyncio.wait_for(started.wait(), 1)
-            with self.assertRaisesRegex(ProviderError, "积压"):
-                for _ in range(4):
-                    await provider.send_audio(voice(1000) + bytes(19200))
-            self.assertLessEqual(len(provider.buffer), MAX_SEGMENT_BYTES)
-        finally:
-            await provider.close()
-        self.assertTrue(cancelled.is_set())
+    async def asyncTearDown(self):
+        await self.provider.close()
+        self.server.close()
+        await self.server.wait_closed()
 
+    async def test_partial_before_end_single_upload_and_deduplicated_finals(self):
+        pcm = bytes(6400)
+        await self.provider.send_audio(pcm)
+        events, done = await asyncio.wait_for(self.provider.receive(), 2)
+        self.assertFalse(done)
+        self.assertEqual(events[0]["type"], "partial_result")
+        await self.provider.send_audio(b"", last=True)
+        finals = []
+        while not done:
+            events, done = await self.provider.receive()
+            finals.extend(events)
+        self.assertEqual([e["nbest"][0]["sentence"] for e in finals], ["定稿。"])
+        self.assertEqual(self.audio, [pcm])
+        self.assertEqual([c["header"]["action"] for c in self.commands], ["run-task", "finish-task"])
+        parameters = self.commands[0]["payload"]["parameters"]
+        self.assertEqual(parameters["vocabulary"], {"麒麟": 3})
+        self.assertEqual(parameters["language_hints"], ["zh"])
+        self.assertEqual(self.commands[0]["payload"]["model"], BAILIAN_ASR_MODEL)
 
-if __name__ == "__main__":
-    unittest.main()
+    async def test_malformed_and_upstream_errors_are_sanitized(self):
+        for payload in ("[]", "null", json.dumps({"header": {"task_id": self.task,
+                        "event": "task-failed", "error_message": "fictional"}})):
+            with self.assertRaises(ProviderError) as error:
+                self.provider.parse(payload)
+            self.assertNotIn("fictional", str(error.exception))
+
+    async def test_heartbeat_and_missing_final(self):
+        def message(kind, payload):
+            return json.dumps({"header": {"event": kind, "task_id": self.task}, "payload": payload})
+        with patch.object(self.provider.socket, "recv", side_effect=[
+            message("result-generated", {"output": {"sentence": {"heartbeat": True}}}),
+            message("task-finished", {}),
+        ]):
+            self.assertEqual(await self.provider.receive(), ([], False))
+            self.provider.ending, self.provider.pending = True, 0
+            with self.assertRaises(ProviderError):
+                await self.provider.receive()

@@ -6,6 +6,8 @@ The complete downstream reference for OpenASRInput and other clients, describing
 
 ## 1. Responsibilities, addresses, and authentication
 
+The `boson_realtime` provider reports `partialResults: false`, `latencyClass: segmented`, and no token/session-hotword support. It uploads audio live and emits `transcript.final` after pauses, at 15 seconds, or on `audio.end`. Clients must accept finals without preceding partials; the existing v1 event schema is unchanged. See [Boson behavior](boson-api-setup.md).
+
 - Default origin: `http://127.0.0.1:10087`. Input takes an HTTP(S) origin without a business path, query, or user/password.
 - Clients capture/resample audio, display waveforms/preedit, identify targets, and commit text.
 - Portal owns recognition sessions, upstreams, credentials, personal hotwords, and quotas; it never manipulates Fcitx or the active application.
@@ -508,6 +510,6 @@ autoLearn counts only deduplicated stable finals after enablement, excluding par
 
 windowDays includes the current UTC day, up to 90 days. Each key retains at most 5000 distinct terms/day; queries show the top 2000, evicting by frequency/recency. Disabling learning keeps history; statistics failures do not interrupt recognition. Clearing statistics preserves the personal list/deduplication IDs. Learning/recommendations never auto-merge into personal terms.
 
-Doubao bidirectional streaming sends serialized `{"hotwords":[{"word":"麒麟"}]}` through request.corpus.context, not the 5000-term nostream interface. The conservative UTF-8 approximation is neither an exact tokenizer nor 100 words; generic weights are omitted. Bailian qwen-audio-3.1-asr-flash sends a term-to-1–5-weight map through parameters.vocabulary, sharing one snapshot for previews/finalization without creating persistent vocabularies. LocalASR currently sends no hotword parameters.
+Doubao bidirectional streaming sends serialized `{"hotwords":[{"word":"麒麟"}]}` through request.corpus.context, not the 5000-term nostream interface. The conservative UTF-8 approximation is neither an exact tokenizer nor 100 words; generic weights are omitted. Bailian `qwen-audio-3.1-asr-flash-streaming` sends a term-to-1–5-weight map through run-task parameters.vocabulary. Soniox `stt-rt-v6` sends context.terms without weights, conservatively capped at 7000 UTF-8 bytes. LocalASR currently sends no hotword parameters. Bailian and Soniox both expose `partialResults: true` and `latencyClass: streaming`; only Bailian supports billable token usage.
 
 Provider references: [Doubao streaming](https://www.volcengine.com/docs/6561/1354869), [hotword specification](https://docs.volcengine.com/docs/DoubaoVoice/Hotwords?lang=zh), [Bailian hotwords](https://help.aliyun.com/zh/model-studio/improve-asr-accuracy). Real enhancement needs real accounts/audio; simulated payload checks do not establish recognition quality.

@@ -1,5 +1,8 @@
 // Nested positions contain authored messages; other placeholders preserve user data.
 export const dynamicMessages = {
+  'auto 自动识别，或 zh / en 等两位语言代码；停顿后返回分段文本，无逐字预览。':
+    'Use auto or a two-letter language code such as zh / en. Text arrives after pauses, without word-by-word previews.',
+  'Boson STT 接口不支持会话级热词增强': 'Boson STT does not support session hotwords',
   '{0} 词': '{0} words',
   已发布: 'Published',
   未发布: 'Unpublished',
@@ -196,15 +199,19 @@ export const dynamicMessages = {
   '官方 WebSocket 地址': 'Official WebSocket address',
   模型资源: 'Model resource',
   二遍识别: 'Second-pass recognition',
-  '百炼 · Qwen ASR Flash': 'Bailian · Qwen ASR Flash',
-  '百炼 HTTP 地址（DashScope）': 'Bailian HTTP address (DashScope)',
-  '推荐使用控制台提供的业务空间 HTTPS 地址，支持 /api/v1 或完整识别路径；保存时自动补齐路径。不要填 /compatible-mode/v1。':
-    'Use the workspace HTTPS address from the console, ending in /api/v1 or the full recognition path. The path is completed on save. Do not use /compatible-mode/v1.',
+  '百炼 · Qwen ASR Streaming': 'Bailian · Qwen ASR Streaming',
+  '百炼 WebSocket 地址（DashScope）': 'Bailian WebSocket address (DashScope)',
+  '使用北京或新加坡业务空间的 WSS 地址，路径为 /api-ws/v1/inference。':
+    'Use the Beijing or Singapore workspace WSS address with /api-ws/v1/inference.',
+  'Soniox · 实时语音识别': 'Soniox · Real-time speech recognition',
+  'auto 自动识别，或 zh / en 等两位语言代码。':
+    'Use auto for detection, or a two-letter language hint such as zh / en.',
+  '最大端点延迟（毫秒）': 'Maximum endpoint delay (ms)',
+  'Soniox 上下文词不传权重；Portal 保守限制为 7000 UTF-8 字节':
+    'Soniox context terms have no weights; Portal conservatively limits them to 7,000 UTF-8 bytes',
   模型: 'Model',
   识别语种: 'Recognition language',
   自动: 'Automatic',
-  预览间隔: 'Preview interval',
-  关闭预览: 'Disable previews',
   '断句静音（毫秒）': 'Segmentation silence (ms)',
   保留方言表达: 'Preserve dialect expressions'
 };

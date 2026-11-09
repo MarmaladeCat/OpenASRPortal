@@ -1,4 +1,4 @@
-"""Offline accounting/quota regressions, including real Portal WS and HTTP adapter calls."""
+"""Offline accounting/quota regressions through Portal and duplex WebSockets."""
 
 import asyncio
 import hashlib
@@ -12,11 +12,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 from aiohttp import ClientSession
 from aiohttp.test_utils import TestServer
 from support_auth import portal_for_tests as Portal
 from test_portal import FakeProvider
+from websockets.exceptions import ConnectionClosedOK
+from websockets.legacy.server import serve
 
 from openasrportal.providers.bailian_asr import BailianProvider
 from openasrportal.storage.store import Store
@@ -84,28 +85,26 @@ class AccountingTests(unittest.TestCase):
         self.usage.update_quota("profile", "local", {"remainingSeconds": 10})
         self.assertEqual(self.store.settings()["defaultProfileId"], "")
 
-    def test_http_final_reservation_prevents_previews_from_spending_final_credit(self):
+    def test_streaming_cumulative_usage_is_not_summed_or_refunded_on_stale_events(self):
         self.store.save("cloud", "Cloud", "bailian_qwen_asr", {"apiKey": "fake-upstream"})
         self.usage.update_quota("profile", "cloud", {"remainingSeconds": 0.4})
         self.start(profile="cloud")
-        accepted, _ = self.usage.accept_audio("s", 6400, snapshot=True)
+        accepted, _ = self.usage.accept_audio("s", 6400)
         self.assertEqual(accepted, 6400)
-        self.assertEqual(self.usage.quota("profile", "cloud")["reservedSeconds"], 0.2)
-        preview = self.usage.begin_call("s", 6400, final=False, snapshot=True)
-        self.assertIsNotNone(preview)
-        self.usage.complete_call(preview, {"total": 5, "input": 3, "output": 2})
-        self.assertIsNone(self.usage.begin_call("s", 6400, final=False, snapshot=True))
-        final = self.usage.begin_call("s", 6400, final=True, snapshot=True)
-        self.usage.complete_call(final, {"total": 6, "input": 4, "output": 2})
+        event = self.usage.begin_call("s", tokens=True)
+        for total in (5, 5, 3, 9):
+            self.usage.complete_call(event, {"total": total, "input": None, "output": None}, final=False)
+        self.usage.complete_call(event, {"total": 11, "input": 9, "output": 2})
         self.usage.finish("s", "finished")
-        self.assertEqual(self.usage.quota("profile", "cloud")["usedSeconds"], 0.4)
+        self.assertEqual(self.usage.quota("profile", "cloud")["usedSeconds"], 0.2)
         self.assertEqual(self.usage.quota("key", self.key_id)["usedSeconds"], 0.2)
         self.assertEqual(self.usage.quota("key", self.key_id)["reportedTokens"], 11)
-        self.assertFalse(self.usage.quota("profile", "cloud")["enabled"])
+        self.assertEqual(self.usage.quota("profile", "cloud")["requests"], 1)
+        self.assertEqual(self.usage.quota("profile", "cloud")["tokenReports"], 1)
 
     def test_tokens_are_not_guessed_and_duplicate_response_cannot_double_charge(self):
         self.start()
-        event = self.usage.begin_call("s", 3200, snapshot=True)
+        event = self.usage.begin_call("s", tokens=True)
         value = {"total": 9, "input": 6, "output": 3}
         self.usage.complete_call(event, value)
         self.usage.complete_call(event, value)
@@ -125,7 +124,7 @@ class AccountingTests(unittest.TestCase):
         self.store.save("cloud", "Cloud", "bailian_qwen_asr", {"apiKey": "fake-upstream"})
         self.usage.update_quota("key", self.key_id, {"remainingTokens": 100})
         self.start(profile="cloud")
-        event = self.usage.begin_call("s", 3200, snapshot=True)
+        event = self.usage.begin_call("s", tokens=True)
         with self.assertRaises(UsageError) as result:
             self.usage.complete_call(event, None)
         self.assertEqual(result.exception.code, "TOKEN_USAGE_UNAVAILABLE")
@@ -135,6 +134,20 @@ class AccountingTests(unittest.TestCase):
             self.usage.check(OWNER, self.store.get("cloud"))
         self.usage.update_quota("key", self.key_id, {"remainingTokens": None})
         self.usage.check(OWNER, self.store.get("cloud"))
+
+    def test_interrupted_stream_retains_partial_tokens_and_blocks_missing_final_usage(self):
+        self.store.save("cloud", "Cloud", "bailian_qwen_asr", {"apiKey": "fake-upstream"})
+        self.usage.update_quota("key", self.key_id, {"remainingTokens": 100})
+        self.start(profile="cloud")
+        event = self.usage.begin_call("s", tokens=True)
+        self.usage.complete_call(event, {"total": 7, "input": 5, "output": 2}, final=False)
+        self.usage.finish("s", "cancelled")
+        self.usage.finish("s", "cancelled")
+        quota = self.usage.quota("key", self.key_id)
+        self.assertEqual(quota["remainingTokens"], 93)
+        self.assertEqual(quota["reportedTokens"], 7)
+        self.assertEqual(quota["tokenReports"], 1)
+        self.assertTrue(quota["tokenBlocked"])
 
     def test_time_ranges_timezone_and_history_survive_profile_deletion(self):
         self.usage.clock = lambda: datetime(
@@ -162,8 +175,8 @@ class AccountingTests(unittest.TestCase):
         self.store.save("cloud", "Cloud", "bailian_qwen_asr", {"apiKey": "fake-upstream"})
         self.usage.update_quota("key", self.key_id, {"remainingTokens": 100})
         self.start(profile="cloud")
-        self.usage.accept_audio("s", 6400, snapshot=True)
-        self.usage.begin_call("s", 6400, final=True, snapshot=True)
+        self.usage.accept_audio("s", 6400)
+        self.usage.begin_call("s", tokens=True)
         reopened = Store(self.directory.name)
         reopened.usage.recover()
         quota = reopened.usage.quota("key", self.key_id)
@@ -358,7 +371,7 @@ class UsageApiTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
                 self.assertIn("error", await response.json())
 
 
-class HttpUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
+class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.requests = []
@@ -368,28 +381,42 @@ class HttpUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
             "cloud",
             "Cloud",
             "bailian_qwen_asr",
-            {"apiKey": "fake-upstream", "previewIntervalMs": 0},
+            {"apiKey": "fake-upstream"},
         )
         self.store.set_default("cloud")
 
-        async def handle(request):
+        async def handle(ws):
+            request = json.loads(await ws.recv())
             self.requests.append(request)
-            if self.request_gate:
-                await self.request_gate.wait()
-            payload = {"output": {"text": "测试结果。"}}
-            if self.include_tokens:
-                payload["usage"] = {"total_tokens": 7, "input_tokens": 5, "output_tokens": 2}
-            return httpx.Response(200, json=payload)
+            task = request["header"]["task_id"]
+            async def event(kind, payload):
+                if self.include_tokens:
+                    payload["usage"] = {"total_tokens": 7, "input_tokens": 5, "output_tokens": 2}
+                await ws.send(json.dumps({"header": {"event": kind, "task_id": task}, "payload": payload}))
+            await event("task-started", {})
+            try:
+                async for message in ws:
+                    if isinstance(message, str):
+                        if self.request_gate:
+                            await self.request_gate.wait()
+                        await event("result-generated", {"output": {"sentence": {
+                            "sentence_id": 0, "text": "测试结果。", "begin_time": 0,
+                            "end_time": 200, "sentence_end": True}}})
+                        await event("task-finished", {})
+            except ConnectionClosedOK:
+                pass
+        self.upstream = await serve(handle, "127.0.0.1", 0)
+        def factory(profile):
+            return BailianProvider({**profile["configuration"], "endpoint":
+                f"ws://127.0.0.1:{self.upstream.sockets[0].getsockname()[1]}"})
+        self.portal.factory = factory
 
-        class MockBailian(BailianProvider):
-            async def open(instance):
-                await super().open()
-                await instance.client.aclose()
-                instance.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    async def asyncTearDown(self):
+        await super().asyncTearDown()
+        self.upstream.close()
+        await self.upstream.wait_closed()
 
-        self.portal.factory = lambda profile: MockBailian(profile["configuration"])
-
-    async def test_real_http_adapter_records_upstream_tokens_and_audio(self):
+    async def test_streaming_adapter_records_cumulative_tokens_and_audio_once(self):
         socket = await self.session()
         await socket.send_bytes(struct.pack("<h", 1500) * 3200)
         await socket.send_json({"type": "audio.end"})
@@ -401,7 +428,7 @@ class HttpUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.usage.quota("profile", "cloud")["usedSeconds"], 0.2)
         await socket.close()
 
-    async def test_http_duration_quota_reserves_final_audio_and_rotates_default(self):
+    async def test_streaming_duration_quota_finishes_and_rotates_default(self):
         self.store.usage.update_quota("profile", "cloud", {"remainingSeconds": 0.15})
         socket = await self.session()
         await socket.send_bytes(struct.pack("<h", 1500) * 3200)
@@ -416,19 +443,19 @@ class HttpUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.settings()["defaultProfileId"], "local")
         await socket.close()
 
-    async def test_http_vad_releases_discarded_silence_reservations(self):
+    async def test_streaming_silence_is_uploaded_and_metered_once(self):
         self.store.usage.update_quota("profile", "cloud", {"remainingSeconds": 1})
         socket = await self.session()
         await socket.send_bytes(bytes(64000))
         await socket.send_json({"type": "audio.end"})
         events = await self.terminal(socket)
         self.assertEqual(events[-1]["type"], "session.finished")
-        self.assertNotIn("reason", events[-1])
-        self.assertEqual(self.store.usage.quota("key", self.key_id)["usedSeconds"], 2)
+        self.assertEqual(events[-1]["reason"], "quota_exhausted")
+        self.assertEqual(self.store.usage.quota("key", self.key_id)["usedSeconds"], 1)
         quota = self.store.usage.quota("profile", "cloud")
-        self.assertEqual(quota["remainingSeconds"], 1)
+        self.assertEqual(quota["remainingSeconds"], 0)
         self.assertEqual(quota["reservedSeconds"], 0)
-        self.assertFalse(self.requests)
+        self.assertEqual(len(self.requests), 1)
         await socket.close()
 
     async def test_token_limited_concurrent_sessions_make_only_one_paid_request(self):

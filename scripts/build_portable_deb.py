@@ -41,6 +41,8 @@ def main():
         [
             "python",
             "/source/scripts/build_deb.py",
+            "--python",
+            "python",
             "--runtime-dir",
             "/build/runtime/openasrportal-runtime",
             "--output",

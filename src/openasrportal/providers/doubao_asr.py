@@ -7,10 +7,10 @@ import struct
 import uuid
 
 from websockets.exceptions import InvalidStatusCode
-from websockets.legacy.client import connect
 
 from ..diagnostics import mark, span, websocket_options
 from ..domain.asr_protocol import ProviderError, text_event
+from .transport import connect
 
 
 def encode_packet(kind, sequence, data, last=False):
@@ -121,6 +121,7 @@ class DoubaoProvider:
             with span("upstreamConnect"):
                 self.socket = await connect(
                     self.config["endpoint"],
+                    use_proxy=self.config.get("useProxy", False), proxy=self.config.get("_proxy"),
                     extra_headers={
                         "X-Api-Key": self.config["apiKey"],
                         "X-Api-Resource-Id": self.config["resourceId"],

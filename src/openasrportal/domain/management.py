@@ -36,15 +36,14 @@ def contract():
         ),
         (
             "bailian_qwen_asr",
-            "百炼 · Qwen ASR Flash",
+            "百炼 · Qwen ASR Streaming",
             [
                 field(
                     "endpoint",
-                    "百炼 HTTP 地址（DashScope）",
+                    "百炼 WebSocket 地址（DashScope）",
                     required=True,
                     description=(
-                        "推荐使用控制台提供的业务空间 HTTPS 地址，支持 /api/v1 或完整识别路径；"
-                        "保存时自动补齐路径。不要填 /compatible-mode/v1。"
+                        "使用北京或新加坡业务空间的 WSS 地址，路径为 /api-ws/v1/inference。"
                     ),
                 ),
                 field("model", "模型", readOnly=True),
@@ -58,23 +57,40 @@ def contract():
                         for value in BAILIAN_LANGUAGES
                     ],
                 ),
+                field("silenceMs", "断句静音（毫秒）", "number", min=200, max=6000, step=100),
+                field("keepDialect", "保留方言表达", "boolean"),
+            ],
+        ),
+        (
+            "soniox_realtime",
+            "Soniox · 实时语音识别",
+            [
+                field("endpoint", "官方 WebSocket 地址", readOnly=True),
+                field("model", "模型", readOnly=True),
+                secret,
+                field("language", "识别语种", required=True,
+                      description="auto 自动识别，或 zh / en 等两位语言代码。"),
+                field("endpointDelayMs", "最大端点延迟（毫秒）", "number", min=500, max=3000, step=100),
+            ],
+        ),
+        (
+            "boson_realtime",
+            "Boson AI · Higgs STT",
+            [
+                field("endpoint", "官方 WebSocket 地址", readOnly=True),
+                field("model", "模型", readOnly=True),
+                secret,
                 field(
-                    "previewIntervalMs",
-                    "预览间隔",
-                    "select",
-                    valueType="number",
-                    options=[
-                        {"value": value, "label": "关闭预览" if value == 0 else f"{value} ms"}
-                        for value in (0, 1500, 2500, 4000)
-                    ],
+                    "language", "识别语种", required=True,
+                    description="auto 自动识别，或 zh / en 等两位语言代码；停顿后返回分段文本，无逐字预览。",
                 ),
                 field("silenceMs", "断句静音（毫秒）", "number", min=600, max=3000, step=100),
-                field("keepDialect", "保留方言表达", "boolean"),
             ],
         ),
     ]
     providers = []
     for provider, title, fields in definitions:
+        fields.append(field("useProxy", "使用全局 Proxy 代理", "boolean"))
         defaults = config_defaults(provider)
         providers.append(
             {

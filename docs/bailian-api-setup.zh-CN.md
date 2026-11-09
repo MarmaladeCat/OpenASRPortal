@@ -2,7 +2,7 @@
 
 [English](bailian-api-setup.md) | **简体中文**
 
-本文介绍如何在阿里云百炼中新建业务空间、授权 **`qwen-audio-3.1-asr-flash`** 模型，并创建绑定该业务空间的 API Key，供 OpenASRPortal **1.0.1** 上游使用。
+本文介绍如何在阿里云百炼中新建业务空间、授权 **`qwen-audio-3.1-asr-flash-streaming`** 模型，并创建绑定该业务空间的 API Key，供 OpenASRPortal **1.1.0** 上游使用。
 
 ## 1. 登录百炼控制台
 
@@ -20,10 +20,10 @@
 
 1. 在 **业务空间管理**中打开刚创建的业务空间。
 2. 进入该空间的 **模型权限流控设置**页面。
-3. 搜索完整模型名称 **`qwen-audio-3.1-asr-flash`**。
+3. 搜索完整模型名称 **`qwen-audio-3.1-asr-flash-streaming`**。
 4. 开通该模型的**模型调用**权限，确认状态为 **已授权**。
 
-当前 Portal 使用的就是这个完整型号。选择时不要误选带 `-streaming`、`-message` 或 `-filetrans` 后缀的模型。如果无法操作授权，请联系账号或业务空间管理员。
+必须选择带 `-streaming` 后缀的完整型号。如果无法操作授权，请联系账号或业务空间管理员。
 
 ## 4. 创建并绑定 API Key
 
@@ -32,7 +32,7 @@
 3. 在**归属业务空间**中，选择刚刚创建并授权模型的业务空间；按页面要求选择归属账号，完成创建。
 4. 立即复制并保存完整的 API Key。新版 Key 通常只在创建成功时完整显示一次。
 
-关键是让这个 API Key **归属于刚授权的业务空间**。如果额外设置了 Key 的自定义模型权限，也要包含 `qwen-audio-3.1-asr-flash`。
+关键是让这个 API Key **归属于刚授权的业务空间**。如果额外设置了 Key 的自定义模型权限，也要包含 `qwen-audio-3.1-asr-flash-streaming`。
 
 ## 5. 将 API Key 绑定到 Portal 上游
 
@@ -43,24 +43,24 @@
 | --- | --- |
 | 配置 ID | 例如 `bailian-main` |
 | 显示名称 | 例如“百炼语音识别” |
-| 提供商 | 百炼 · Qwen ASR Flash |
+| 提供商 | 百炼 · Qwen ASR Streaming |
 | 上游 API Key | 刚创建并绑定业务空间的 API Key，只填 Key 本身 |
-| HTTPS 地址 | 该业务空间的 DashScope 地址，见下方说明 |
-| 模型 | 保留只读的 `qwen-audio-3.1-asr-flash` |
+| WebSocket 地址 | 该业务空间的 DashScope WSS 地址，见下方说明 |
+| 模型 | 保留只读的 `qwen-audio-3.1-asr-flash-streaming` |
 | 其他识别选项 | 首次使用保留默认值 |
 
 在百炼控制台该业务空间的接入信息中取得 **Workspace ID**。北京地域可填写：
 
 ```text
-https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1
+wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference
 ```
 
-将 `{WorkspaceId}` 连同花括号替换为刚创建的业务空间 ID，不是空间名称。Portal 会自动补齐识别路径。这里使用 **DashScope HTTP 地址**，不要填写通用聊天接口的 `/compatible-mode/v1`。
+将 `{WorkspaceId}` 连同花括号替换为刚创建的业务空间 ID，不是空间名称。官方 WSS 根地址也会自动补齐路径。兼容旧共享域名 `wss://dashscope.aliyuncs.com/api-ws/v1/inference`；阿里云推荐业务空间专属域名。
 
 若使用新加坡地域，使用该地域业务空间和 Key，并将地址改为：
 
 ```text
-https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1
+wss://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/inference
 ```
 
 3. 点击 **测试上游连接**，成功后点击 **保存接入配置**。
@@ -70,10 +70,14 @@ https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1
 
 ## 费用与常见问题
 
-- **计费**：该模型按输入、输出 Token 计费，价格及免费额度以百炼控制台为准。Portal 的预览会重复提交当前语段音频；增大预览间隔或关闭预览可减少这部分请求和用量。
+Portal 发送 `run-task` 并等待 `task-started`，逐块上传一次 16 kHz 单声道 PCM16，转发上游 partial/final 分句。结束时发送 `finish-task`，等待 `task-finished`。服务端静音断句范围 200–6000 ms，默认 800 ms。没有本地 VAD、重复 HTTP 识别、预览间隔或 HTTP 回退。
+
+读取旧 HTTP 档案时自动迁移模型及协议/路径，保留地域、业务空间、Key、静音设置、档案 ID 和配额；保存后持久化新设置。使用前需要授权流式模型，配置迁移不能代替云端授权。
+
+- **计费**：以百炼当前价格为准。Portal 音频只计一次，每个任务计一次请求；累计 Token 只扣增量，任务结束用最终报告结算。共用限额账户的 Token 限额流串行执行。缺少最终用量时暂停 Token 限额账户，需调整预算或去掉 Token 限额；取消保留已知用量。最终结算可能超过剩余预算。
 - **提示模型无权限**：回到刚创建的业务空间，确认模型的调用状态是 **已授权**，再确认 API Key 归属于这个空间。
 - **提示 Key 无效**：确认复制了完整的百炼 API Key，地域正确，输入框里没有 `Bearer` 前缀。
-- **地址无法保存或请求失败**：核对 Workspace ID、地域和 `/api/v1` 路径，使用与 Key 匹配的空间地址。
+- **地址无法保存或请求失败**：核对 Workspace ID、地域、WSS 协议及 `/api-ws/v1/inference` 路径，使用与 Key 匹配的空间地址。
 - **客户端配置**：客户端使用 Portal 派生的 ASR Key，百炼 API Key 填在 Portal 上游中。测试连接后仍需保存档案。
 
 ## 官方参考
@@ -81,5 +85,5 @@ https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1
 - [业务空间权限管理](https://help.aliyun.com/zh/model-studio/permission-management-overview)
 - [获取与配置 API Key](https://help.aliyun.com/zh/model-studio/get-api-key)
 - [地域与接入域名](https://help.aliyun.com/zh/model-studio/regions)
-- [`qwen-audio-3.1-asr-flash` 模型详情与价格](https://help.aliyun.com/zh/model-studio/qwen-audio-3-1-asr-flash)
-- [Qwen-Audio-ASR HTTP API](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-http-api)
+- [流式 WebSocket 连接](https://help.aliyun.com/en/model-studio/qwen-audio-asr-streaming-websocket-api)
+- [客户端事件](https://help.aliyun.com/en/model-studio/qwen-audio-asr-streaming-client-events) · [服务端事件](https://help.aliyun.com/en/model-studio/qwen-audio-asr-streaming-server-events)

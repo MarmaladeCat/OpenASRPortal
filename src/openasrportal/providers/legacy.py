@@ -11,21 +11,25 @@ from websockets.exceptions import ConnectionClosed
 from websockets.legacy.server import serve
 
 from ..domain.asr_protocol import ProviderError, describe_error
-from ..domain.config import BAILIAN_MODEL, DOUBAO_MODEL, LOCAL_ASR_MODEL, validate_config
+from ..domain.config import (
+    BAILIAN_MODEL,
+    BOSON_MODEL,
+    DOUBAO_MODEL,
+    LOCAL_ASR_MODEL,
+    SONIOX_MODEL,
+    validate_config,
+)
+from .bailian_asr import BailianProvider
+from .boson_asr import BosonProvider
 from .dashscope_asr import DashScopeProvider
 from .doubao_asr import DoubaoProvider
-
-
-def bailian_provider(config):
-    # 按需导入，现有豆包部署无需先安装百炼 HTTP 依赖。
-    from .bailian_asr import BailianProvider
-
-    return BailianProvider(config)
-
+from .soniox_asr import SonioxProvider
 
 PROVIDERS = {
+    SONIOX_MODEL: SonioxProvider,
+    BOSON_MODEL: BosonProvider,
     DOUBAO_MODEL: DoubaoProvider,
-    BAILIAN_MODEL: bailian_provider,
+    BAILIAN_MODEL: BailianProvider,
     LOCAL_ASR_MODEL: DashScopeProvider,
 }
 

@@ -7,6 +7,8 @@ HTTP JSON，管理请求携带 `Authorization: Bearer <管理会话令牌>`，�
 首次设置和登录见下文；密码/Key 由数据库管理，不使用凭据环境变量。
 所有配置读取都脱敏，上游 Key 仅保留在 Portal。
 
+提供商 `boson_realtime` 暴露 `apiKey`、固定 `endpoint`（`wss://api.boson.ai/v1/realtime`）、固定 `model`（`higgs-stt-3.1`）、`language`（`auto` 或两位小写语言代码）和整数 `silenceMs`（600–3000，默认 800）。支持时长额度，不支持 Token 额度和会话热词。见[开通配置](boson-api-setup.zh-CN.md)。
+
 ## 接口
 
 | 方法      | 路径                            | 语义                                               |
@@ -80,6 +82,14 @@ min/max/step、options、valueType=number 和 retainWhenOmitted。
 消费者按字段契约渲染，不复制 Portal 内部提供商校验和默认值代码。
 
 ## 默认与会话
+
+### 上游代理
+
+所有提供商配置都包含布尔字段 `useProxy`（默认 `false`），描述契约也提供此选项。管理设置和管理档案列表包含 `proxy: {url, hasCredentials}`；客户端列表不包含全局代理设置。凭据永不回传。
+
+使用独立的 `PATCH /v1/admin/settings` 请求：`{"proxy":{"url":"https://proxy.example:8443"}}`。地址只接受 HTTP/HTTPS 主机与端口，不允许 URL 内凭据、查询串或路径。可选 `username` 和 `password` 必须同时提供，使用 Portal 密钥保管文件加密保存。同地址省略凭据时保留认证；两个空字符串清除认证。修改或清空地址会清除旧认证，除非同时提供新凭据。空地址移除代理。
+
+勾选的上游（包括 LocalASR）在连接测试和新识别连接中使用代理，同时校验目标及 HTTPS 代理证书。未勾选的档案直接连接，不受环境代理变量影响。代理缺失或不可达会报错，不回退直连。设置变更不改道已建立的连接。代理认证与上游鉴权相互隔离；词典下载不受此设置控制。
 
 首个配置成为默认；可通过 settings 显式修改默认和 `profileOrder`。
 客户端不指定 `profileId` 时使用默认，明确指定时使用指定配置。
@@ -198,13 +208,15 @@ PATCH `/v1/admin/asr-keys/{id}/quota` 或 `/v1/admin/profiles/{id}/quota` 接受
 
 `GET /v1/admin/usage` 参数：from/to（Unix 秒或 ISO 8601），bucket=hour/day/month，keyId，profileId，timezone（IANA，如 Asia/Shanghai）。默认最近七天、UTC；返回 total/timeline/keys/profiles/trackingStartedAt/resolutionSeconds。普通客户端 `/v1/profiles` 仅见可用状态，不见余额和累计。
 
-时长按实际提交 PCM 的 32000 字节/秒计量，不按连接等待计时。按完整样本原子扣减，余额边界截取并正常收尾；未连接和过期票据不扣音频，失败/取消保留已用量。上游流式统计实际发送音频；百炼 HTTP 每次预览和定稿各计一次，所以可能多于下游时长。HTTP 为最终音频预留额度，余量不足跳过预览，VAD 丢弃静音释放预留；清理释放未使用预留。
+时长按提交 PCM 的 32000 字节/秒计量，不按连接等待计时。按完整样本原子扣减，余额边界截取并正常收尾；未连接和过期票据不扣音频，失败/取消保留已用量。上游音频只计一次。Soniox 云端按含空闲的流时长计费，与本地音频配额不同。旧预留列仅保留用于数据库兼容和重启恢复。
+
+`bailian_qwen_asr` 使用 `qwen-audio-3.1-asr-flash-streaming`、官方 WSS `/api-ws/v1/inference`、`language`、`keepDialect` 和服务端 `silenceMs`（200–6000，默认 800），已移除预览间隔。旧 HTTP 设置读取/保存时迁移，保留凭据和配额。`soniox_realtime` 暴露 Key、固定端点/模型（`stt-rt-v6`）、`language`（`auto` 或两位提示代码）及 `endpointDelayMs`（500–3000，默认 2000）。见[百炼](bailian-api-setup.zh-CN.md)和 [Soniox](soniox-api-setup.zh-CN.md)。
 
 管理测试只计上游，未保存草稿用 `draft:提供商:id` 区分。音频历史按分钟压缩，查询向外覆盖完整分钟，余额扣减仍按样本。Portal 不是厂商账单/云余额查询。
 
-Token 采用上游 usage 的 total_tokens 或 input_tokens/output_tokens、prompt_tokens/completion_tokens，按请求去重；不凭文字长度估计。HTTP 预览的真实 Token 同样累计。无报告显示未上报；部分报告同时显示真实总量与未报告次数。豆包/LocalASR 当前不提供 Token 计量，设置 Token 限额时拒绝选用；百炼返回与否取决于模型，限额请求缺失报告会 tokenBlocked，停止后续调用。
+Token 采用上游 usage 的 total_tokens 或 input_tokens/output_tokens、prompt_tokens/completion_tokens，不凭文字长度估计。百炼上报任务累计量：只扣增量，重复或过期总量不重复计费，每任务计一次请求/报告。无报告显示未上报，中断任务保留已知部分总量。豆包、LocalASR、Boson 和 Soniox 不提供计费 Token 报告，设置 Token 限额时拒绝选用。百炼最终用量缺失时设置 tokenBlocked，停止后续调用，即使此前已收到部分用量。
 
-Token 在请求完成后结算，最后一次可能超出余额，真实用量全额入账、余额归零；限额范围内 HTTP 请求串行准入。管理员降低余额不能撤销已执行请求。可清除 Token 限额改用时长，或确认上游恢复上报后重新设置预算解除暂停。
+Token 在任务完成后结算，最终可能超出余额，真实用量全额入账、余额归零；Token 限额范围内流式任务串行准入，直到正常、错误或取消后的清理。管理员降低余额不能撤销已执行工作。可清除 Token 限额改用时长，或确认上游恢复上报后重新设置预算解除暂停。
 
 上游耗尽或缺少必需报告时自动停用，默认从排序下一项向后循环选可用者，全不可用置空并返回 NO_UPSTREAM_AVAILABLE。自动耗尽者补预算可恢复；手动停用须显式启用；管理员明确清空默认不会被补预算覆盖。`profileOrder` 必须完整包含所有档案且不重复，可和 defaultProfileId 原子更新。切换只影响新会话，不拼接活动录音。
 

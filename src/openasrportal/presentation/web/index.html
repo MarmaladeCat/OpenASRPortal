@@ -100,9 +100,29 @@
           >
             <span>⌁</span>访问与权限
           </button>
+          <button id="tab-proxy" data-page="proxy" role="tab" aria-controls="page-proxy"
+            aria-selected="false" tabindex="-1"><span>⇄</span>Proxy 代理</button>
           <div class="nav-note"><span class="dot"></span>Management v1</div>
         </nav>
         <main id="admin-body">
+          <section id="page-proxy" class="page" role="tabpanel" aria-labelledby="tab-proxy" hidden>
+            <div class="page-heading">
+              <h2>Proxy 代理</h2>
+              <p>配置 Portal 访问上游的 HTTP/HTTPS 代理，并在每个上游档案中勾选使用代理。</p>
+              <p>连接测试和新识别连接使用此设置；代理失败不会回退直连。地址留空可移除代理。</p>
+            </div>
+            <form id="proxy-form" class="editor-card" autocomplete="off">
+              <label>代理地址<input id="proxy-url" type="url" placeholder="http://proxy.example.com:8080" /></label>
+              <p id="proxy-auth-status" class="hint"></p>
+              <label class="check"><input id="proxy-update-auth" type="checkbox" />更新代理认证</label>
+              <div class="two-columns">
+                <label>代理用户名<input id="proxy-username" autocomplete="off" maxlength="1024" disabled /></label>
+                <label>代理密码<input id="proxy-password" type="password" autocomplete="new-password" maxlength="1024" disabled /></label>
+              </div>
+              <p class="hint">勾选后同时留空可清除认证；修改代理地址时会清除旧认证。凭据不会回显。</p>
+              <button id="proxy-save" class="primary" type="submit">保存代理设置</button>
+            </form>
+          </section>
           <section id="page-overview" class="page" role="tabpanel" aria-labelledby="tab-overview">
             <div class="page-heading">
               <h2>服务概览</h2>
@@ -458,8 +478,7 @@
               <strong>计量口径</strong>
               <p>
                 下游时长按实际提交的 PCM
-                音频计算，不按连接等待时间计费。上游时长累计实际请求音频，HTTP
-                重复预览会重复计量；管理连接测试只计入上游。
+                音频计算；上游按上传音频计量，管理连接测试只计入上游。Soniox 云端按连接时长计费，与此本地音频预算不同。
               </p>
               <p>
                 音频统计精度为分钟，查询边界按整分钟覆盖；配额扣减按 PCM16 样本计算，不按分钟取整。
@@ -469,8 +488,7 @@
                 限额不能用于不提供计量的上游。统计从新版本启用后开始，历史用量不会凭空补算。
               </p>
               <p>
-                当前限额是 Portal 本地预算，云平台的计费取整可能不同。Token
-                在请求返回后扣除，最后一个请求可能超过剩余 Token；到达限额后不会继续发起请求。
+                当前限额是 Portal 本地预算。百炼 Token 按流式累计用量的增量扣除，最终结算可能超过剩余预算；到达限额后结束音频并等待最终结果。
               </p>
             </div>
           </section>

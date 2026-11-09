@@ -38,15 +38,17 @@ python scripts/build.py --deployment docker --arch amd64
 python scripts/build.py --deployment windows --arch amd64 --wix-bin <WiX-directory>
 ```
 
-debs use Ubuntu 22.04 / PyInstaller 6.16.0; images use Python 3.12.10 / Debian 12. MSI orchestration uses native Windows Python 3.12.10 and WiX 3.14.1; bundled private Python is 3.13.16, service wrapper WinSW 2.12.0. packaging/ recipes call build_portable_deb.py, build_image.py, or build_windows.py without workspace source dependencies.
+debs use Ubuntu 22.04 / SHA256-pinned Python 3.12.10 / PyInstaller 6.16.0; images use Python 3.12.10 / Debian 12. The private DEB interpreter enables HTTPS proxy TLS-in-TLS while retaining the Ubuntu 22.04 libc baseline. Source installations need Python 3.11+ for HTTPS proxies. MSI orchestration uses native Windows Python 3.12.10 and WiX 3.14.1; bundled private Python is 3.13.16, service wrapper WinSW 2.12.0. packaging/ recipes call build_portable_deb.py, build_image.py, or build_windows.py without workspace source dependencies.
 
-Candidates: `.cache/build/artifacts/<os>/<arch>/<variant>/`. Publish to `release/1.0.1/`; VERSION/package metadata are 1.0.1. Flat output contains debs, image bundles, MSI, bilingual docs ZIP/READMEs, manifest.json, SHA256SUMS. Docker bundles contain real image.tar and authored deployment instructions, never dist/ output.
+Candidates: `.cache/build/artifacts/<os>/<arch>/<variant>/`. Publish to `release/1.1.0/`; VERSION/package metadata are 1.1.0. Flat output contains debs, image bundles, MSI, bilingual docs ZIP/READMEs, manifest.json, SHA256SUMS. Docker bundles contain real image.tar and authored deployment instructions, never dist/ output.
 
 Publication verifies provenance, unique candidates, version, architecture, and hashes before replacement; matching-source other-platform artifacts merge. Building is not service installation/upgrade/uninstallation or real-recognition acceptance. Store records in test-results/.
 
 ## Deployment maintenance boundaries
 
 Migrations preserve profiles, keys, revocations, hotwords, and usage. Back up the whole data directory, including asr-key-vault.key. Offline recovery: `python -m openasrportal.entrypoints.admin --data-dir <actual-directory>`, with interactive password entry only, never plaintext CLI arguments.
+
+Stored Bailian HTTP profiles are normalized on read into the streaming model and WSS path, then persisted on save. Never reintroduce HTTP preview requests. Streaming usage is cumulative per task, not per event; keep historical database reservation columns compatible without using them for new streams. Soniox final tokens accumulate once and provisional tokens replace a suffix; endpoint/final completion must not duplicate text. Provider-specific tests and bilingual configuration contracts accompany protocol changes.
 
 Standalone installation does not configure Input. Windows combined MSI connects only through public product-owner entry points and ACL-protected handoff files, not shared databases. Legacy pairing remains for v1 compatibility; see management API.
 

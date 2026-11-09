@@ -44,6 +44,8 @@ id is immutable, up to 100 characters, allowing letters/digits/underscore/hyphen
 
 ## Descriptive contract
 
+Provider `boson_realtime` exposes `apiKey`, fixed `endpoint` (`wss://api.boson.ai/v1/realtime`), fixed `model` (`higgs-stt-3.1`), `language` (`auto` or two lowercase letters), and integer `silenceMs` (600–3000, default 800). It supports duration quotas, not token quotas or session hotwords. See [setup](boson-api-setup.md).
+
 GET contract returns:
 
 ```json
@@ -71,6 +73,14 @@ GET contract returns:
 Types: text / secret / boolean / number / select. Supported metadata: default, required, readOnly, min/max/step, options, valueType=number, retainWhenOmitted. Consumers render the contract instead of copying Portal's provider validation/default code. Descriptive labels may be localized.
 
 ## Defaults and sessions
+
+### Upstream proxy
+
+Every provider's configuration includes boolean `useProxy` (default `false`), also exposed by the descriptive form contract. Admin settings/profile listings include `proxy: {url, hasCredentials}`; client listings omit global proxy settings. Credentials are never returned.
+
+Use a separate `PATCH /v1/admin/settings` with `{"proxy":{"url":"https://proxy.example:8443"}}`. Only HTTP/HTTPS host/port URLs are accepted; no URL credentials, query or path. Optional `username` and `password` must be supplied together, and are encrypted with the Portal key vault. Omission retains authentication for the same address; two empty strings remove it. Changing or clearing the URL removes old credentials unless new ones are supplied. An empty URL removes the proxy.
+
+Selected upstreams use this proxy for probes and new recognition connections, including LocalASR. Both target and HTTPS-proxy certificates are verified. Unselected profiles connect directly, independent of environment proxy variables. Missing/unreachable proxies fail without direct fallback. Settings changes do not reroute an established socket. Proxy credentials stay separate from upstream authorization; dictionary downloads are outside this setting.
 
 The first profile becomes default. settings can explicitly update the default and `profileOrder`. Omitted client profileId uses default; explicit selection pins that profile. Deleting/disabling/exhausting the default selects the next available profile in order, or none. Edits/deletion never rewrite active provider snapshots; quotas use current state at subsequent submission. See Usage and quotas for missing token reports.
 
@@ -160,19 +170,21 @@ Sources include [THUOCL](https://github.com/thunlp/THUOCL), [Rime Ice](https://g
 
 ## Usage and quotas
 
+`bailian_qwen_asr` uses `qwen-audio-3.1-asr-flash-streaming`, official WSS `/api-ws/v1/inference`, `language`, `keepDialect`, and server-side `silenceMs` (200–6000, default 800). The preview-interval field is removed. Stored HTTP settings migrate on read/save, preserving credentials and quotas. `soniox_realtime` exposes a key, fixed endpoint/model (`stt-rt-v6`), `language` (`auto` or a two-letter hint), and `endpointDelayMs` (500–3000, default 2000). See [Bailian setup](bailian-api-setup.md) and [Soniox setup](soniox-api-setup.md).
+
 PATCH `/v1/admin/asr-keys/{id}/quota` or `/v1/admin/profiles/{id}/quota` accepts `{"remainingSeconds":900,"remainingTokens":null}`; upstreams also accept enabled. Values are replacement balances, not increments. null means unlimited, 0 exhausted, omitted unchanged; cumulative totals persist. Either exhausted dimension blocks future calls.
 
 Admin quota contains remainingSeconds, remainingTokens, reservedSeconds, availableSeconds, usedSeconds, reportedTokens, tokens, requests, tokenReports, unreportedRequests, enabled, disabledReason, tokenBlocked, exhausted, priority. Without token reports, tokens is null, not 0.
 
 `GET /v1/admin/usage` accepts from/to (Unix seconds or ISO 8601), bucket=hour/day/month, keyId, profileId, timezone (IANA, e.g. Asia/Shanghai). Defaults: last seven days, UTC. Returns total/timeline/keys/profiles/trackingStartedAt/resolutionSeconds. Ordinary `/v1/profiles` shows availability, not balances/totals.
 
-Duration meters actual submitted PCM at 32000 bytes/second, not connection wait. Debit complete samples atomically; truncate at balance boundaries and finalize normally. Unconnected/expired tickets consume no audio; failure/cancellation retain actual usage. Streaming upstreams meter sent audio. Bailian HTTP meters every preview/final request, so upstream duration may exceed downstream. HTTP reserves final-audio quota, skips previews if insufficient, releases reservations for VAD-discarded silence, and releases unused reservations on cleanup.
+Duration meters submitted PCM at 32000 bytes/second, not connection wait. Debit complete samples atomically; truncate at balance boundaries and finalize normally. Unconnected/expired tickets consume no audio; failure/cancellation retain actual usage. Upstream audio counts once. Soniox cloud billing uses stream duration including idle time and therefore differs from local audio quotas. Legacy reservation columns remain only for database compatibility and restart recovery.
 
 Admin tests meter upstream only; unsaved drafts use `draft:provider:id`. Audio history is minute-compressed; queries expand to full minutes while debit remains sample-based. Portal is not a provider billing/cloud-balance service.
 
-Tokens use actual upstream usage total_tokens or input_tokens/output_tokens, prompt_tokens/completion_tokens, deduplicated per request, never estimated from text length. Real HTTP preview tokens count too. Missing reports display unreported; partial reporting shows real totals plus unreported request counts. Doubao/LocalASR currently lack token metering and reject token-limited selection. Bailian depends on model reporting; a missing report under a token limit sets tokenBlocked and stops future calls.
+Tokens use actual upstream usage total_tokens or input_tokens/output_tokens, prompt_tokens/completion_tokens, never text length. Bailian reports cumulative task usage: only increases are debited, duplicate/stale totals do not double-charge, and each task counts as one request/report. Missing reports display unreported; known partial totals remain visible if a task is interrupted. Doubao, LocalASR, Boson and Soniox lack billable token reports and reject token-limited selection. Missing final Bailian usage under a token limit sets tokenBlocked and stops future calls, even if earlier partial usage was reported.
 
-Tokens settle after completion, so the last call may exceed remaining balance: all actual usage is recorded, balance becomes zero. HTTP admission is serialized within limited scopes. Lowering a balance cannot undo executed calls. Remove token limits/use duration, or confirm restored upstream reporting and reset budget to clear the pause.
+Tokens settle at completion, so the task may exceed remaining balance: all actual usage is recorded, balance becomes zero. Streaming admission is serialized within token-limited scopes until cleanup, including errors/cancellation. Lowering a balance cannot undo executed work. Remove token limits/use duration, or confirm restored upstream reporting and reset budget to clear the pause.
 
 Exhausted/missing-required-report upstreams disable automatically. Default selection cycles forward through order; if none is usable, clear it and return NO_UPSTREAM_AVAILABLE. Replenishing auto-exhausted profiles can restore them; manual disables need explicit enablement. Explicitly clearing default is respected when budgets are replenished. profileOrder must contain all profiles exactly once and can update atomically with defaultProfileId. Switching affects new sessions, never splices active recordings.
 

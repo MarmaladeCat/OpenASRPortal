@@ -10,6 +10,17 @@ let credential = sessionStorage.getItem('openasrportal-admin-session') || '',
   defaultId = '',
   asrKeys = [];
 const fields = new Map();
+let proxyDirty = false;
+function showProxy(value) {
+  if (proxyDirty) return;
+  byId('proxy-url').value = value?.url || '';
+  byId('proxy-auth-status').textContent = value?.hasCredentials ? '已保存代理认证' : '未配置代理认证';
+  byId('proxy-update-auth').checked = false;
+  for (const id of ['proxy-username', 'proxy-password']) {
+    byId(id).value = '';
+    byId(id).disabled = true;
+  }
+}
 let keyHotwordId = null,
   keyHotwordData,
   keyDictionaryCatalog,
@@ -290,6 +301,8 @@ function showPage(page, focus = true) {
   if (page === 'public' && credential) action(refreshPublicDictionaries)();
 }
 function disconnect() {
+  proxyDirty = false;
+  showProxy(null);
   credential = '';
   sessionStorage.removeItem('openasrportal-admin-session');
   keyHotwordId = null;
@@ -378,6 +391,7 @@ async function refresh() {
   const listing = await request(descriptor.profilesPath);
   profiles = listing.profiles;
   defaultId = listing.defaultProfileId;
+  showProxy(listing.proxy);
   byId('login').hidden = true;
   byId('workspace').hidden = false;
   byId('logout').hidden = false;
@@ -1198,6 +1212,32 @@ byId('form').onsubmit = (event) => {
     fields.clear();
     byId('fields').replaceChildren();
     await refresh();
+  })();
+};
+byId('proxy-form').oninput = () => { proxyDirty = true; };
+byId('proxy-update-auth').onchange = () => {
+  for (const id of ['proxy-username', 'proxy-password']) {
+    byId(id).disabled = !byId('proxy-update-auth').checked;
+    if (byId(id).disabled) byId(id).value = '';
+  }
+};
+byId('proxy-form').onsubmit = (event) => {
+  event.preventDefault();
+  action(async () => {
+    const proxy = { url: byId('proxy-url').value.trim() };
+    if (byId('proxy-update-auth').checked) {
+      proxy.username = byId('proxy-username').value;
+      proxy.password = byId('proxy-password').value;
+    }
+    byId('proxy-save').disabled = true;
+    try {
+      const value = await request(descriptor.settingsPath, 'PATCH', { proxy });
+      proxyDirty = false;
+      showProxy(value.proxy);
+      status('代理设置已保存，新连接生效。');
+    } finally {
+      byId('proxy-save').disabled = false;
+    }
   })();
 };
 byId('key-form').onsubmit = (event) => {

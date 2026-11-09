@@ -8,6 +8,8 @@ HTTP 和 WebSocket 都属于 v1；不直接连接豆包、百炼或 LocalASR 的
 
 ## 1. 职责、地址与认证
 
+`boson_realtime` 的能力为 `partialResults: false`、`latencyClass: segmented`，不支持 Token 计量和会话热词。音频实时上传，在停顿、达到 15 秒或 `audio.end` 时返回 `transcript.final`。客户端须接受没有前置 partial 的 final；现有 v1 事件结构不变。见 [Boson 行为说明](boson-api-setup.zh-CN.md)。
+
 - 默认 Portal 地址：`http://127.0.0.1:10087`；Input 设置填写 HTTP(S) origin，不带业务路径、查询或用户密码。
 - 客户端采集麦克风、重采样、显示波形和预编辑、判断输入目标并提交文字。
 - Portal 管理识别会话、上游连接、凭据、个人热词和配额，不操纵 Fcitx 或当前应用。
@@ -580,6 +582,6 @@ autoLearn 只统计启用后的去重稳定 final；partial、重复 final、管
 
 windowDays 包含当前 UTC 日，最多 90 天；每 Key 每日最多 5000 种词，查询展示前 2000 种，超量按词频和最近时间淘汰。关闭学习保留历史，统计失败不打断识别，清空统计保留个人表和去重 ID。统计和公共推荐永远不自动并入个人表。
 
-豆包当前双向流式通过 request.corpus.context 发送序列化 `{"hotwords":[{"word":"麒麟"}]}`，不是 nostream 的 5000 词接口；100 tokens 用保守 UTF-8 字节预算近似，不能当精确 tokenizer 或 100 个词，不传通用 weight。百炼 qwen-audio-3.1-asr-flash 通过 parameters.vocabulary 发送词到 1–5 权重映射，预览/定稿使用同一快照，不创建持久热词表。LocalASR 当前不发送热词参数。
+豆包当前双向流式通过 request.corpus.context 发送序列化 `{"hotwords":[{"word":"麒麟"}]}`，不是 nostream 的 5000 词接口；100 tokens 用保守 UTF-8 字节预算近似，不能当精确 tokenizer 或 100 个词，不传通用 weight。百炼 `qwen-audio-3.1-asr-flash-streaming` 通过 run-task parameters.vocabulary 发送词到 1–5 权重映射。Soniox `stt-rt-v6` 发送不带权重的 context.terms，保守限制为 7000 UTF-8 字节。LocalASR 当前不发送热词参数。百炼和 Soniox 均暴露 `partialResults: true`、`latencyClass: streaming`；仅百炼支持计费 Token 用量。
 
 提供商依据：[豆包流式接口](https://www.volcengine.com/docs/6561/1354869)、[热词规范](https://docs.volcengine.com/docs/DoubaoVoice/Hotwords?lang=zh)、[百炼热词说明](https://help.aliyun.com/zh/model-studio/improve-asr-accuracy)。实际增强效果需真实账号和音频验证，模拟载荷检查不能代替识别质量测试。

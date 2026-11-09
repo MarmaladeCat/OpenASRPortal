@@ -1,14 +1,12 @@
 """Personal vocabulary isolation, rolling counts, wire payloads and session snapshots."""
 
 import hashlib
-import json
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import httpx
 from aiohttp import ClientSession
 from aiohttp.test_utils import TestServer
 from support_auth import fixture_token
@@ -237,14 +235,5 @@ class HotwordAPITests(unittest.IsolatedAsyncioTestCase):
     async def test_bailian_inline_vocabulary_wire_payload(self):
         config = validate_config("bailian_qwen_asr", {"apiKey": "test"})
         config["hotwords"] = [{"text": "麒麟", "weight": 3}, {"text": "Kubernetes", "weight": 4}]
-        seen = []
-
-        def upstream(request):
-            seen.append(json.loads(request.content))
-            return httpx.Response(200, json={"output": {"text": "麒麟"}})
-
         provider = BailianProvider(config)
-        async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
-            provider.client = client
-            await provider._transcribe(bytes(3200))
-        self.assertEqual(seen[0]["parameters"]["vocabulary"], {"麒麟": 3, "Kubernetes": 4})
+        self.assertEqual(provider.parameters()["vocabulary"], {"麒麟": 3, "Kubernetes": 4})

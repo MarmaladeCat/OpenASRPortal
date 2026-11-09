@@ -70,6 +70,8 @@ def validate_settings(patch, previous):
 
 
 def capability(provider):
+    if provider == "boson_realtime":
+        return {"supported": False, "mode": "none", "note": "Boson STT 接口不支持会话级热词增强"}
     if provider == "doubao_realtime":
         return {
             "supported": True,
@@ -91,6 +93,10 @@ def capability(provider):
             "weightMax": 5,
             "note": "Qwen Audio 3.1 即时热词最多 2000 个；普通权重 1–5",
         }
+    if provider == "soniox_realtime":
+        return {"supported": True, "mode": "context-terms", "maxEntries": 2000,
+                "budgetUnit": "utf8-bytes-conservative", "budget": 7000,
+                "note": "Soniox 上下文词不传权重；Portal 保守限制为 7000 UTF-8 字节"}
     return {"supported": False, "mode": "none", "note": "当前本地模型接口不支持会话级热词增强"}
 
 
@@ -111,6 +117,12 @@ def select_terms(provider, terms, settings):
             if len(text) > 9 or any(c.isdigit() or not (c.isalnum() or c == " ") for c in text):
                 reason = "term-format"
             elif budget + cost > 100:
+                reason = "token-budget"
+            else:
+                budget += cost
+        elif provider == "soniox_realtime":
+            cost = len(text.encode("utf-8")) + 4
+            if budget + cost > 7000:
                 reason = "token-budget"
             else:
                 budget += cost

@@ -22,6 +22,12 @@ setup creates Python tests in `.cache/functional/`, product desktop dependencies
 
 ## Required coverage
 
+Proxy checks use disposable HTTP and HTTPS CONNECT proxies and a locally trusted WSS echo/protocol server. Cover binary/text/empty-text frames, separate proxy/upstream authentication, explicit direct routing, no fallback, rejected authentication, timeout/cancellation cleanup, encrypted persistence, admin-only redaction, public probe/recognition routing, and bilingual profile/settings UI. These simulated endpoints verify transport, not cloud recognition. Re-run the transport tests in the packaged runtime as well as the development interpreter.
+
+Bailian and Soniox use simulated WebSocket wire tests for partials before audio end, stable/deduplicated finals, server errors, completion markers, raw PCM, and bounded state. Public v1 checks cover quota truncation, probes, cancellation/timeout, cumulative token accounting and limited-account serialization; migration keeps old keys/regions/quotas. UI checks cover streaming model fields, removal of preview intervals, Soniox settings and both languages. These tests do not establish cloud recognition or latency. Real acceptance needs provider credentials, public Chinese/English audio, pre-stop partials, end-to-final timing, and actual usage records under test-results/; installer/native acceptance remains platform-specific.
+
+Boson adapter checks use a simulated WebSocket for manual-turn initialization, ordered/deduplicated finals, empty audio, errors/disconnects, bounded backlog, cancellation during pending transcription, public v1 finalization, duration quotas, and probe metering. Profile UI checks cover Boson fields, language switching, and retained keys. For real-cloud acceptance, provide a temporary Boson key outside the checkout, replay public 16 kHz PCM speech including two separated turns, and retain audio hashes, event timing/finalCount, and usage under test-results/. Keep silence probes, real recognition, microphone input, and installer checks distinct.
+
 | Layer                  | Checks                                                                                                                 |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | unit/core              | Setup/auth/logout, profile/key isolation, HTTP/WS v1, revision/final/cancel, quota/usage, hotwords/restart persistence |

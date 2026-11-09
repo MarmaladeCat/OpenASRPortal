@@ -9,11 +9,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from ..domain.config import public_config, validate_config
+from ..domain.config import migrate_config, public_config, validate_config
 from ..domain.hotwords import capability
 from .auth import AuthStore
 from .hotwords import HotwordStore
 from .key_vault import KeyVault, VaultError
+from .proxy import ProxySettings
 from .public_dictionaries import PublicDictionaryStore
 from .usage import UsageStore
 
@@ -50,6 +51,7 @@ class Store:
         self.hotwords = HotwordStore(self)
         self.public_dictionaries = PublicDictionaryStore(self)
         self.auth = AuthStore(self)
+        self.proxy = ProxySettings(self)
 
     @contextmanager
     def connection(self):
@@ -66,7 +68,7 @@ class Store:
             row = connection.execute(
                 "SELECT * FROM profiles WHERE id = ?", (profile_id,)
             ).fetchone()
-        return {**dict(row), "configuration": json.loads(row["configuration"])} if row else None
+        return {**dict(row), "configuration": migrate_config(row["provider"], json.loads(row["configuration"]))} if row else None
 
     def save(self, profile_id, title, provider, patch):
         previous = self.get(profile_id)
@@ -109,14 +111,15 @@ class Store:
             self.usage.rotate(connection, profile_id)
             connection.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
 
-    def settings(self):
+    def settings(self, *, admin=False):
         with self.connection() as connection:
             settings = {
                 "defaultProfileId": connection.execute(
                     "SELECT value FROM settings WHERE name='defaultProfileId'"
                 ).fetchone()[0]
             }
-        return {**settings, "profileOrder": self.usage.profile_order()}
+        return {**settings, "profileOrder": self.usage.profile_order(),
+                **({"proxy": self.proxy.public()} if admin else {})}
 
     def set_default(self, profile_id):
         if not isinstance(profile_id, str) or (profile_id and self.get(profile_id) is None):
@@ -152,6 +155,9 @@ class Store:
             with self.connection() as connection:
                 if connection.execute(
                     "SELECT 1 FROM asr_keys WHERE encrypted_secret IS NOT NULL LIMIT 1"
+                ).fetchone() or connection.execute(
+                    "SELECT 1 FROM settings WHERE name='proxy' AND "
+                    "json_extract(value, '$.credentials') != ''"
                 ).fetchone():
                     raise VaultError(
                         "已有加密 ASR Key，但保管文件缺失；请恢复备份，不自动更换保管密钥"
@@ -270,7 +276,7 @@ class Store:
         return [self.public(self.get(profile_id), admin=admin) for profile_id in ids]
 
     def public(self, profile, *, admin=False):
-        streaming = profile["provider"] == "doubao_realtime"
+        streaming = profile["provider"] in ("doubao_realtime", "bailian_qwen_asr", "soniox_realtime")
         quota = self.usage.quota("profile", profile["id"])
         if quota is not None and not admin:
             quota = {
@@ -284,7 +290,7 @@ class Store:
             "configuration": public_config(profile["configuration"], profile["provider"]),
             "quota": quota,
             "capabilities": {
-                "partialResults": True,
+                "partialResults": profile["provider"] != "boson_realtime",
                 "textProcessing": "native",
                 "latencyClass": "streaming" if streaming else "segmented",
                 "audio": {"encoding": "pcm_s16le", "sampleRate": 16000, "channels": 1},

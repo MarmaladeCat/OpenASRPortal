@@ -1,4 +1,16 @@
 export const errorMessages = {
+  'Boson AI 转写积压，请停止录音并检查网络后重试':
+    'Boson AI transcription is backed up. Stop recording, check the network, and retry.',
+  '请使用 Boson AI 官方实时 WebSocket 端点': 'Use the official Boson AI realtime WebSocket endpoint',
+  'Boson 语种须为 auto 或两位小写语言代码': 'Use auto or a lowercase two-letter language code for Boson',
+  'Boson AI 返回了无效的实时事件': 'Boson AI returned an invalid realtime event',
+  'Boson AI 转写失败或会话到期，请检查 Key、额度及模型权限':
+    'Boson AI transcription failed or the session expired. Check the key, credit, and model access.',
+  'Boson AI 连接失败（HTTP {0}），请检查 API Key 和额度':
+    'Boson AI connection failed (HTTP {0}). Check the API key and credit.',
+  'Boson AI 未确认转写会话启动': 'Boson AI did not acknowledge the transcription session',
+  'Boson AI 录音会话已经结束': 'The Boson AI recording session has ended',
+  'Boson AI 返回了不匹配的转写分段': 'Boson AI returned a mismatched transcription segment',
   '请求体必须是 JSON 对象': 'Request body must be a JSON object',
   'Portal 接入凭据无效': 'Invalid Portal credentials',
   '请通过本机 Portal 地址访问管理页面': 'Open administration using the local Portal address',
@@ -85,13 +97,20 @@ export const errorMessages = {
   '请填写 OpenLocalASR 的 ws(s)://主机:端口/api-ws/v1/inference 地址':
     'Enter the OpenLocalASR ws(s)://host:port/api-ws/v1/inference address',
   请填写远程服务当前启用的模型名称: 'Enter the model currently enabled by the remote service',
-  '百炼端点必须为官方 HTTPS 地址': 'Bailian endpoint must be an official HTTPS address',
-  '请使用百炼北京/新加坡官方 HTTPS 根地址、/api/v1 或完整 multimodal-generation/generation 地址；此适配器不使用 OpenAI 兼容协议':
-    'Use the official Bailian Beijing/Singapore HTTPS origin, /api/v1, or full multimodal-generation/generation path. This adapter does not use OpenAI-compatible APIs.',
+  '百炼端点必须为官方 WSS 地址': 'Bailian endpoint must be an official WSS address',
+  '请使用百炼北京/新加坡官方 WSS 地址，路径为 /api-ws/v1/inference':
+    'Use an official Bailian Beijing/Singapore WSS address with /api-ws/v1/inference',
   不支持的百炼识别语种: 'Unsupported Bailian recognition language',
   保留方言选项必须为布尔值: 'Preserve dialect must be a boolean',
-  '预览间隔必须为 0 / 1500 / 2500 / 4000 毫秒':
-    'Preview interval must be 0 / 1500 / 2500 / 4000 ms',
+  '百炼断句静音应为 200–6000 毫秒': 'Bailian segmentation silence must be 200–6000 ms',
+  '请使用 Soniox 官方实时 WebSocket 端点': 'Use the official Soniox real-time WebSocket endpoint',
+  'Soniox 语种须为 auto 或两位小写语言代码': 'Use auto or a lowercase two-letter language hint for Soniox',
+  'Soniox 端点延迟应为 500–3000 毫秒': 'Soniox endpoint delay must be 500–3000 ms',
+  'Soniox 连接失败（HTTP {0}），请检查 API Key': 'Soniox connection failed (HTTP {0}). Check the API key.',
+  'Soniox 音频已经结束': 'Soniox audio has already ended',
+  'Soniox 识别失败，请检查密钥、模型权限、额度与音频参数':
+    'Soniox recognition failed. Check the key, model access, credit, and audio settings.',
+  'Soniox 返回了无效的流式识别结果': 'Soniox returned an invalid streaming result',
   '断句静音应为 600–3000 毫秒': 'Segmentation silence must be 600–3000 ms',
   '此适配器使用 {0}': 'This adapter uses {0}',
   词频无效: 'Invalid word frequency',
@@ -131,21 +150,15 @@ export const errorMessages = {
   '排除热词最多 {0} 个': 'Up to {0} excluded hotwords are allowed',
   '{0} 必须为布尔值': '{0} must be a boolean',
   '{0} 必须为 {1} 的整数': '{0} must be an integer in {1}',
-  '百炼响应缺少识别文本，不能作为正常定稿':
-    'Bailian response contains no recognized text and cannot be treated as a final result',
-  百炼返回了无效的识别结果: 'Bailian returned an invalid recognition result',
-  '百炼识别请求失败，请检查模型权限、账户额度与音频格式':
-    'Bailian recognition failed. Check model access, account quota, and audio format.',
-  百炼录音会话已经结束: 'Bailian recording session ended',
-  '百炼识别请求超时，请检查网络后重试':
-    'Bailian recognition timed out. Check the network and retry.',
-  '无法连接百炼，请检查后端网络及端点地址':
-    'Cannot connect to Bailian. Check backend network and endpoint.',
-  '百炼返回了无效 JSON 响应': 'Bailian returned invalid JSON',
-  '百炼调用失败（HTTP {0}），请检查 API Key、地域、模型权限和额度':
-    'Bailian request failed (HTTP {0}). Check API key, region, model access, and quota.',
-  '百炼识别请求积压，请停止录音并检查网络后重试':
-    'Bailian requests are backlogged. Stop recording, check the network, and retry.',
+  '百炼流式任务失败，请检查模型权限、额度与音频参数':
+    'Bailian streaming task failed. Check model access, credit, and audio settings.',
+  '百炼返回了无效的流式任务事件': 'Bailian returned an invalid streaming task event',
+  '百炼连接失败（HTTP {0}），请检查地址和 API Key':
+    'Bailian connection failed (HTTP {0}). Check the address and API key.',
+  '百炼未确认流式任务启动': 'Bailian did not acknowledge the streaming task',
+  '百炼音频已经结束': 'Bailian audio has already ended',
+  '百炼未完成最终分句': 'Bailian did not complete the final sentence',
+  '百炼返回了无效的流式识别结果': 'Bailian returned an invalid streaming result',
   'OpenLocalASR 未确认任务启动': 'OpenLocalASR did not confirm task startup',
   'OpenLocalASR 结果缺少文本': 'OpenLocalASR result contains no text',
   'OpenLocalASR 任务失败，请检查服务模型是否就绪、模型名和音频参数':

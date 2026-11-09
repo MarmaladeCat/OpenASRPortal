@@ -56,6 +56,21 @@ async function run() {
   await js(`document.getElementById('admin-key').value='test-admin-password';
     document.getElementById('connect').click();`);
   await wait('!document.getElementById("workspace").hidden');
+  await js(`document.getElementById('tab-proxy').click();
+    document.getElementById('proxy-url').value='https://proxy.example:8443';
+    document.getElementById('proxy-update-auth').click();
+    document.getElementById('proxy-username').value='fictional-user';
+    document.getElementById('proxy-password').value='fictional-proxy-password';`);
+  await require('./language_ui.cjs').language(window, 'en');
+  assert.equal(await js('document.getElementById("proxy-password").value'), 'fictional-proxy-password');
+  assert.equal(await js('document.getElementById("proxy-save").textContent'), 'Save proxy settings');
+  await js(`document.getElementById('proxy-form').requestSubmit();`);
+  await wait('document.getElementById("proxy-password").value === ""');
+  assert.equal(await js('document.getElementById("proxy-update-auth").checked'), false);
+  await js(`document.getElementById('refresh').click();`);
+  await wait('document.getElementById("proxy-auth-status").textContent === "Proxy authentication saved"');
+  assert.equal(await js('document.getElementById("proxy-url").value'), 'https://proxy.example:8443');
+  await require('./language_ui.cjs').language(window, 'zh-CN');
   // Observe actual requests, while still sending them to the real management API.
   await js(`window.profileWrites=[];window.profileProbes=[];
     const originalFetch=window.fetch;
@@ -70,6 +85,8 @@ async function run() {
     ['doubao-2', 'key-2']
   ]) {
     await newDoubao();
+    assert.equal(await js('document.querySelector("#fields [name=useProxy]").checked'), false);
+    if (id === 'doubao-1') await js('document.querySelector("#fields [name=useProxy]").checked = true');
     assert.equal(await js(`${secret}.value`), '');
     assert.equal(await js(`${secret}.required`), true);
     assert.equal(await js(`${secret}.autocomplete`), 'new-password');
@@ -93,6 +110,7 @@ async function run() {
     'key-2'
   ]);
   const endpoints = await js('window.profileWrites.map(value=>value.configuration.endpoint)');
+  assert.deepEqual(await js('window.profileWrites.map(value=>value.configuration.useProxy)'), [true, false]);
   assert.equal(endpoints[0], endpoints[1]);
   await js(`Array.from(document.querySelectorAll('#profiles article[data-id="doubao-2"] button'))
     .find(button=>button.textContent==='修改').click();`);
@@ -122,6 +140,47 @@ async function run() {
     document.getElementById('provider').dispatchEvent(new Event('change'));`);
   assert.equal(await js(`${secret}.value`), '');
   assert.equal(await js(`${secret}.required`), true);
+  assert.equal(await js('document.querySelector("#fields input[name=model]").value'), 'qwen-audio-3.1-asr-flash-streaming');
+  assert.equal(await js('document.querySelector("#fields [name=previewIntervalMs]") === null'), true);
+  assert.ok((await js('document.querySelector("#fields input[name=endpoint]").value')).startsWith('wss://'));
+  await js(`document.getElementById('provider').value='boson_realtime';
+    document.getElementById('provider').dispatchEvent(new Event('change'));`);
+  assert.equal(await js(`${secret}.value`), '');
+  assert.equal(await js('document.querySelector("#fields input[name=model]").value'), 'higgs-stt-3.1');
+  assert.equal(await js('document.querySelector("#fields input[name=endpoint]").readOnly'), true);
+  await js(`document.getElementById('profile-id').value='boson-1';
+    document.getElementById('profile-title').value='Boson 测试';
+    ${secret}.value='fictional-boson-key';
+    document.querySelector('#fields input[name=language]').value='zh';`);
+  await require('./language_ui.cjs').language(window, 'en');
+  assert.equal(await js('document.querySelector("#fields input[name=language]").value'), 'zh');
+  assert.ok(await js('document.getElementById("fields").textContent.includes("without word-by-word previews")'));
+  await js(`document.getElementById('form').requestSubmit();`);
+  await wait(`document.querySelector('#profiles article[data-id="boson-1"]') !== null`);
+  assert.equal(await js('window.profileWrites.at(-1).provider'), 'boson_realtime');
+  await js(`Array.from(document.querySelectorAll('#profiles article[data-id="boson-1"] button'))
+    .find(button=>button.textContent==='Edit').click();`);
+  assert.equal(await js(`${secret}.value`), '');
+  assert.equal(await js(`${secret}.required`), false);
+  await js(`document.getElementById('form').requestSubmit();`);
+  await wait('document.getElementById("editor").hidden');
+  assert.equal(await js('window.profileWrites.at(-1).configuration.apiKey'), undefined);
+  await js(`document.getElementById('new').click();
+    document.getElementById('provider').value='soniox_realtime';
+    document.getElementById('provider').dispatchEvent(new Event('change'));`);
+  assert.equal(await js('document.querySelector("#fields input[name=model]").value'), 'stt-rt-v6');
+  assert.equal(await js(`${secret}.value`), '');
+  await js(`document.getElementById('profile-id').value='soniox-1';
+    document.getElementById('profile-title').value='Soniox 测试';
+    ${secret}.value='fictional-soniox-key';
+    document.querySelector('#fields input[name=language]').value='zh';`);
+  await require('./language_ui.cjs').language(window, 'zh-CN');
+  assert.equal(await js('document.querySelector("#fields input[name=language]").value'), 'zh');
+  await require('./language_ui.cjs').language(window, 'en');
+  assert.ok(await js('document.getElementById("fields").textContent.includes("Maximum endpoint delay")'));
+  await js(`document.getElementById('form').requestSubmit();`);
+  await wait(`document.querySelector('#profiles article[data-id="soniox-1"]') !== null`);
+  assert.equal(await js('window.profileWrites.at(-1).provider'), 'soniox_realtime');
   console.log(
     'PASS Portal profile editor: same endpoint, independent keys, empty new keys, validation, edit/cancel/provider reset'
   );

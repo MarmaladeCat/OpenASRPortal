@@ -2,7 +2,7 @@
 
 **English** | [简体中文](doubao-api-setup.zh-CN.md)
 
-Create a Volcengine project, activate **Doubao streaming speech recognition 2.0**, and bind its API key to an upstream profile in OpenASRPortal **1.0.1**.
+Create a Volcengine project, activate **Doubao streaming speech recognition 2.0**, and bind its API key to an upstream profile in OpenASRPortal **1.1.0**.
 
 ## 1. Sign in to Volcengine
 

@@ -2,7 +2,15 @@
 
 **English** | [简体中文](user-guide.zh-CN.md)
 
-Version **1.0.1**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
+## HTTP/HTTPS proxy
+
+Native packages include a compatible private runtime. Source installations need Python 3.11+ for HTTPS proxies (HTTP proxies also work on Python 3.10).
+
+Open **Proxy** in Portal administration and save an `http://` or `https://` proxy address. Optional authentication is entered separately; select **Update proxy authentication** to replace it, or leave both credential fields empty to remove it. Saved credentials are encrypted and never displayed. Changing the proxy address clears old authentication unless you provide new credentials.
+
+In each upstream profile, select **Use global Proxy** and save. The selection applies to connection tests and new recognition connections for every provider. An unavailable or missing proxy produces an error rather than bypassing it. Unselected profiles connect directly. An empty global address removes the proxy; already-established recognition connections keep their route. HTTPS means TLS to the proxy itself; WSS traffic also verifies the upstream certificate. Use the service machine's trusted CA store for private proxy certificates.
+
+Version **1.1.0**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
 
 For service activation, API keys, and matching Portal settings, see the separate [Doubao Speech](doubao-api-setup.md) and [Alibaba Cloud Model Studio](bailian-api-setup.md) setup guides.
 
@@ -50,7 +58,7 @@ Native packages include private Python; images include service runtimes, but nei
 
 ### 2.2 Windows service installation
 
-1. Run `OpenASRPortal_1.0.1_windows_amd64.msi` and authorize service installation.
+1. Run `OpenASRPortal_1.1.0_windows_amd64.msi` and authorize service installation.
 2. Open http://127.0.0.1:10087/admin. If occupied, identify the existing instance before initializing the wrong service.
 3. Complete password/upstream/client setup in §2.5.
 4. Check OpenASRPortal in Windows Services. Closing the browser does not stop it.
@@ -66,7 +74,7 @@ Windows 11 amd64 service extracted from 1.0.0 MSI, with temporary data/demo prof
 In the download directory, substituting ARM64 when needed:
 
 ```bash
-sudo apt install ./OpenASRPortal_1.0.1_linux_amd64.deb
+sudo apt install ./OpenASRPortal_1.1.0_linux_amd64.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
@@ -79,7 +87,7 @@ Captured from version 1.0 source on Linux amd64, initialized with a demo LocalAS
 
 ### 2.4 Linux Docker bundle
 
-Extract `OpenASRPortal_1.0.1_linux_amd64.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
+Extract `OpenASRPortal_1.1.0_linux_amd64.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
 
 ```bash
 docker load -i image.tar
@@ -147,14 +155,27 @@ Shows profile count, valid key count, and upstream/downstream relationships. Con
 - Second-pass recognition defaults on; later revisions can replace initial text. Compare accuracy/finalization delay before disabling.
 - Multiple accounts use separate profiles, keys, order, and quotas.
 
-**Bailian Qwen ASR Flash**
+**Bailian Qwen ASR Streaming**
 
-- Enter the DashScope HTTPS endpoint for the console workspace, allowing /api/v1 or the full recognition path; saving completes the path. **Do not use /compatible-mode/v1.**
-- Current model is read-only qwen-audio-3.1-asr-flash. Follow the contract, not arbitrary chat-model names.
+- Enter the workspace DashScope WSS endpoint with `/api-ws/v1/inference`. See [Bailian setup](bailian-api-setup.md).
+- Current model is read-only `qwen-audio-3.1-asr-flash-streaming`; authorize this exact model.
 - Language can be automatic or explicit when known.
-- Preview can be off or 1500/2500/4000 ms, default 2500. More frequent previews repeat HTTP recognition/audio usage, not merely screen updates.
-- Silence segmentation: 600–3000 ms, default 1200. Shorter ends phrases earlier; longer tolerates pauses.
+- Audio streams once over WebSocket; partials come directly from the model. Stored HTTP profiles migrate on read, preserving keys and quotas.
+- Server-side silence segmentation: 200–6000 ms, default 800. Shorter ends phrases earlier; longer tolerates pauses.
 - Preserve Dialect defaults off; enable as needed, with model-dependent results.
+
+**Boson AI · Higgs STT**
+
+- Use the official read-only WebSocket endpoint and `higgs-stt-3.1` model with a Boson API key.
+- Language is `auto` or a two-letter hint. Silence is 600–3000 ms, default 800 ms.
+- Audio uploads live; completed text arrives after a pause, at 15 seconds, or on stop. No word-by-word previews or session hotwords. Use duration quotas.
+- See [Boson setup and protocol behavior](boson-api-setup.md).
+
+**Soniox · Real-time speech recognition**
+
+- Fixed `stt-rt-v6` model and official WebSocket endpoint; API key authenticates during the handshake.
+- Language `auto` or a two-letter hint; maximum endpoint delay 500–3000 ms, default 2000.
+- Real partials, semantic endpoint finals, and context hotwords. Use audio-duration quotas; Soniox bills connection duration separately. See [Soniox setup](soniox-api-setup.md).
 
 ### 3.5 Client keys: issue, reveal, revoke
 
@@ -172,9 +193,9 @@ Both profile/client cards support remaining duration. UI units are **minutes**, 
 - Saving 60 means “60 minutes remain now,” not “add 60.”
 - Either duration/token exhaustion blocks further recognition.
 - Check enabled state too; replenishment does not override manual disablement.
-- Actual tokens settle after requests; the last request may exceed balance. Missing reports are not zero. Do not apply token budgets to unmetered upstreams.
+- Actual cumulative tokens debit by differences and settle at task completion; final usage may exceed balance. Missing reports are not zero. Do not apply token budgets to unmetered upstreams.
 
-These are local Portal budgets, not cloud bills. Provider rounding, preview repeats, and final requests affect comparisons.
+These are local Portal budgets, not cloud bills. Cloud rounding and Soniox's connection-duration billing affect comparisons.
 
 ### 3.7 Usage and statistics
 
@@ -182,7 +203,7 @@ Set start/end, hour/day/month buckets, and all or specific client key/profile, t
 
 The UI displays its query timezone (browser timezone), totals, trends, and both group details. Compare timezone/interval across devices. No independent timezone selector exists; automated management queries may specify one.
 
-Downstream duration measures actual submitted PCM, not waiting. Upstream sums request audio, including HTTP re-recognition. Admin tests count upstream only. Failure/cancellation do not erase usage. Time queries cover whole-minute boundaries; quotas still debit by samples, not minute rounding.
+Downstream duration measures submitted PCM, not waiting. Upstream counts uploaded audio once; admin tests count upstream only. Failure/cancellation do not erase usage. Time queries cover whole-minute boundaries; quotas debit by samples, not minute rounding.
 
 ### 3.8 Public hotword tables
 
@@ -265,7 +286,7 @@ Check positive balance, manual disablement, missing-report token blocks, and usa
 
 ### Why are upstream minutes greater than speaking time?
 
-Bailian HTTP previews resubmit accumulated audio; admin tests count too. Distinguish downstream PCM, upstream request audio, and cloud billing. Compare with longer preview intervals or disabled previews.
+Admin tests count upstream only. Compare submitted PCM, uploaded audio, and cloud billing separately. Soniox bills stream duration including idle time; Portal counts audio. Bailian token reports are cumulative per streaming task and are not summed across events.
 
 ### Why does publication not give users every hotword?
 

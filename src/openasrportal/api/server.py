@@ -125,7 +125,11 @@ class Portal:
         self.store, self.listen_host = store, listen_host
         seed_public_dictionaries(store.public_dictionaries)
         self.factory = factory or (
-            lambda profile: PROVIDERS[profile["provider"]](profile["configuration"])
+            lambda profile: PROVIDERS[profile["provider"]]({
+                **profile["configuration"],
+                "_proxy": self.store.proxy.runtime()
+                if profile["configuration"].get("useProxy") else None,
+            })
         )
         self.sessions = {}
         self.max_sessions, self.ticket_ttl = max_sessions, ticket_ttl
@@ -634,7 +638,7 @@ class Portal:
             return web.json_response(
                 {
                     "profiles": self.store.list(admin=True),
-                    **self.store.settings(),
+                    **self.store.settings(admin=True),
                     "managementVersion": 1,
                 }
             )
@@ -655,12 +659,15 @@ class Portal:
     async def admin_settings(self, request):
         self.authenticate(request, admin=True)
         if request.method == "GET":
-            return web.json_response(self.store.settings())
+            return web.json_response(self.store.settings(admin=True))
         body = await request_object(request)
+        if set(body) == {"proxy"}:
+            self.store.proxy.save(body["proxy"])
+            return web.json_response(self.store.settings(admin=True))
         if not body or body.keys() - {"defaultProfileId", "profileOrder"}:
             raise PortalError("INVALID_REQUEST", "未知的默认配置或排序字段")
         self.store.usage.configure_defaults(body)
-        return web.json_response(self.store.settings())
+        return web.json_response(self.store.settings(admin=True))
 
     async def ui_ticket(self, request):
         self.authenticate(request, admin=True)
@@ -767,20 +774,24 @@ class Portal:
         identity = secrets.token_urlsafe(18)
         self.store.usage.new_session(identity, None, billing_profile, "probe")
         self.store.usage.activate(identity)
-        if getattr(provider, "request_metered", False):
-            provider.usage_meter = SessionMeter(self.store.usage, identity, self.billing_locks)
-        else:
-            original_open, original_send = provider.open, provider.send_audio
+        meter = None
+        original_open, original_send = provider.open, provider.send_audio
+        if getattr(provider, "token_metered", False):
+            meter = SessionMeter(self.store.usage, identity, self.billing_locks)
+            provider.usage_callback = meter.response
 
-            async def metered_open():
-                await original_open()
+        async def metered_open():
+            if meter:
+                await asyncio.wait_for(meter.start(), 20)
+            await original_open()
+            if not meter:
                 self.store.usage.begin_call(identity)
 
-            async def metered_send(pcm, last=False):
-                accepted, scope = self.store.usage.accept_audio(identity, len(pcm))
-                await original_send(pcm[:accepted], last=last or scope is not None)
+        async def metered_send(pcm, last=False):
+            accepted, scope = self.store.usage.accept_audio(identity, len(pcm))
+            await original_send(pcm[:accepted], last=last or scope is not None)
 
-            provider.open, provider.send_audio = metered_open, metered_send
+        provider.open, provider.send_audio = metered_open, metered_send
         result = {}
         try:
             with self.store.connection() as db:
@@ -788,7 +799,11 @@ class Portal:
             result = await test_connection(provider)
             return web.json_response(result)
         finally:
-            self.store.usage.finish(identity, "finished" if result.get("ok") else "failed")
+            try:
+                self.store.usage.finish(identity, "finished" if result.get("ok") else "failed")
+            finally:
+                if meter:
+                    meter.close()
 
     def reap(self):
         for value, entry in list(self.ui_tickets.items()):
@@ -921,6 +936,7 @@ class Portal:
         session.ticket = ""
         session.ws = ws
         provider = None
+        meter = None
         tasks = []
         outcome, error_code = "failed", ""
         try:
@@ -932,16 +948,17 @@ class Portal:
                 self.store.usage.activate(session.id)
             with span("providerConstruct"):
                 provider = self.factory(session.profile)
-            snapshot = getattr(provider, "request_metered", False)
-            if snapshot:
-                provider.usage_meter = SessionMeter(
+            if getattr(provider, "token_metered", False):
+                meter = SessionMeter(
                     self.store.usage, session.id, self.billing_locks
                 )
+                provider.usage_callback = meter.response
+                await asyncio.wait_for(meter.start(), 20)
             with span("providerOpen"):
                 await asyncio.wait_for(provider.open(), 20)
             if session.cancelled or ws.closed:
                 return ws
-            if not snapshot:
+            if not meter:
                 with span("usageBeginCall"):
                     self.store.usage.begin_call(session.id)
             await session.emit(
@@ -962,7 +979,7 @@ class Portal:
                 async def send(pcm, last=False):
                     try:
                         accepted, scope = self.store.usage.accept_audio(
-                            session.id, len(pcm), snapshot=snapshot
+                            session.id, len(pcm)
                         )
                     except UsageError as error:
                         if error.code not in ("QUOTA_EXHAUSTED", "PROFILE_DISABLED"):
@@ -974,10 +991,6 @@ class Portal:
                     await provider.send_audio(pcm[:accepted], last=last)
                     if accepted:
                         mark("firstUpstreamAudioSent")
-                    if snapshot:
-                        self.store.usage.shrink_reservation(
-                            session.id, provider.required_final_audio_bytes
-                        )
                     if last:
                         ended.set()
                     return not last
@@ -1090,6 +1103,8 @@ class Portal:
                         session.id, "cancelled" if session.cancelled else outcome, error_code
                     )
                 finally:
+                    if meter:
+                        meter.close()
                     self.sessions.pop(session.id, None)
                     if ws.prepared:
                         await ws.close()

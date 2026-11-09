@@ -5,9 +5,9 @@ import json
 import uuid
 
 from websockets.exceptions import InvalidStatusCode
-from websockets.legacy.client import connect
 
 from ..domain.asr_protocol import ProviderError, text_event
+from .transport import connect
 
 
 class DashScopeProvider:
@@ -49,6 +49,7 @@ class DashScopeProvider:
         try:
             self.socket = await connect(
                 self.config["endpoint"],
+                use_proxy=self.config.get("useProxy", False), proxy=self.config.get("_proxy"),
                 extra_headers={
                     "Authorization": "Bearer " + self.config["apiKey"],
                 },

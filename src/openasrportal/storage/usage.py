@@ -454,8 +454,8 @@ class UsageStore:
             raise UsageError("SESSION_CLOSED", "计量会话已经结束", 409)
         return row
 
-    def accept_audio(self, identity, byte_count, *, snapshot=False):
-        """Atomically debit client audio; reserve final HTTP audio or debit streaming audio."""
+    def accept_audio(self, identity, byte_count):
+        """Atomically debit accepted PCM once for both client and upstream."""
         if type(byte_count) is not int or byte_count < 0 or byte_count % 2:
             raise ValueError("计量音频必须包含完整 PCM16 样本")
         if not byte_count:
@@ -471,12 +471,6 @@ class UsageStore:
                 if account is None or account["remaining_audio_bytes"] is None:
                     continue
                 remaining = account["remaining_audio_bytes"]
-                if scope == "profile" and snapshot:
-                    remaining -= db.execute(
-                        "SELECT COALESCE(SUM(reserved_audio_bytes),0) FROM usage_sessions "
-                        "WHERE profile_id=? AND ended_at IS NULL",
-                        (session["profile_id"],),
-                    ).fetchone()[0]
                 if remaining <= available:
                     available = max(0, remaining // 2 * 2)
                     exhausted_scope = scope
@@ -487,63 +481,29 @@ class UsageStore:
                     "ELSE MAX(0,remaining_audio_bytes-?) END WHERE scope='key' AND subject_id=?",
                     (available, available, session["key_id"]),
                 )
-            upstream_audio = 0
-            if snapshot:
-                db.execute(
-                    "UPDATE usage_sessions SET reserved_audio_bytes=reserved_audio_bytes+? WHERE id=?",
-                    (available, identity),
-                )
-            else:
-                upstream_audio = available
-                db.execute(
-                    "UPDATE usage_accounts SET used_audio_bytes=used_audio_bytes+?, "
-                    "remaining_audio_bytes=CASE WHEN remaining_audio_bytes IS NULL THEN NULL "
-                    "ELSE MAX(0,remaining_audio_bytes-?) END WHERE scope='profile' AND subject_id=?",
-                    (available, available, session["profile_id"]),
-                )
-                self.disable_depleted(db, session["profile_id"])
+            db.execute(
+                "UPDATE usage_accounts SET used_audio_bytes=used_audio_bytes+?, "
+                "remaining_audio_bytes=CASE WHEN remaining_audio_bytes IS NULL THEN NULL "
+                "ELSE MAX(0,remaining_audio_bytes-?) END WHERE scope='profile' AND subject_id=?",
+                (available, available, session["profile_id"]),
+            )
+            self.disable_depleted(db, session["profile_id"])
             if available:
                 self.event(
-                    db, session, key_audio=available if key else 0, upstream_audio=upstream_audio
+                    db, session, key_audio=available if key else 0, upstream_audio=available
                 )
             return available, exhausted_scope
 
-    def begin_call(self, identity, byte_count=0, *, final=False, snapshot=False):
+    def begin_call(self, identity, *, tokens=False):
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             session = self.session(db, identity)
-            profile = self.check_account(db, "profile", session["profile_id"])
+            self.check_account(db, "profile", session["profile_id"])
             if session["key_id"]:
                 # Audio reaching its exact limit may still be finalized and billed.
                 key = self.account(db, "key", session["key_id"])
                 if key["remaining_tokens"] == 0 or key["token_blocked"]:
                     raise UsageError("QUOTA_EXHAUSTED", "客户端 Key 的 Token 额度不可继续使用")
-            remaining = profile["remaining_audio_bytes"]
-            if snapshot and remaining is not None:
-                reserved = db.execute(
-                    "SELECT COALESCE(SUM(reserved_audio_bytes),0) FROM usage_sessions "
-                    "WHERE profile_id=? AND ended_at IS NULL",
-                    (session["profile_id"],),
-                ).fetchone()[0]
-                allowed = remaining if final else max(0, remaining - reserved)
-                if byte_count > allowed:
-                    if not final:
-                        return None  # Keep final-audio credit instead of spending it on a preview.
-                    raise UsageError(
-                        "QUOTA_EXHAUSTED", "上游剩余时长不足以完成当前片段，请管理员调整额度"
-                    )
-            if snapshot:
-                db.execute(
-                    "UPDATE usage_accounts SET used_audio_bytes=used_audio_bytes+?, "
-                    "remaining_audio_bytes=CASE WHEN remaining_audio_bytes IS NULL THEN NULL "
-                    "ELSE MAX(0,remaining_audio_bytes-?) END WHERE scope='profile' AND subject_id=?",
-                    (byte_count, byte_count, session["profile_id"]),
-                )
-                if final:
-                    db.execute(
-                        "UPDATE usage_sessions SET reserved_audio_bytes=MAX(0,reserved_audio_bytes-?) WHERE id=?",
-                        (byte_count, identity),
-                    )
             for scope, subject in (("profile", session["profile_id"]), ("key", session["key_id"])):
                 if subject:
                     db.execute(
@@ -554,33 +514,27 @@ class UsageStore:
             return self.event(
                 db,
                 session,
-                upstream_audio=byte_count if snapshot else 0,
                 requests=1,
-                settled=0 if snapshot else 1,
+                settled=0 if tokens else 1,
             )
 
-    def shrink_reservation(self, identity, required_bytes):
-        """Release VAD-discarded silence; never enlarge a reservation after admission."""
-        with self.store.connection() as db:
-            db.execute(
-                "UPDATE usage_sessions SET reserved_audio_bytes=MIN(reserved_audio_bytes,?) "
-                "WHERE id=? AND ended_at IS NULL",
-                (required_bytes, identity),
-            )
-
-    def complete_call(self, identity, usage):
+    def complete_call(self, identity, usage, *, final=True):
         unavailable = False
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             event = db.execute("SELECT * FROM usage_events WHERE id=?", (identity,)).fetchone()
             if event is None or event["settled"]:
                 return
+            old = event["tokens"]
+            total = max(old or 0, usage["total"]) if usage else old
+            delta = (total or 0) - (old or 0)
             db.execute(
-                "UPDATE usage_events SET tokens=?,input_tokens=?,output_tokens=?,settled=1 WHERE id=?",
+                "UPDATE usage_events SET tokens=?,input_tokens=?,output_tokens=?,settled=? WHERE id=?",
                 (
-                    usage["total"] if usage else None,
-                    usage["input"] if usage else None,
-                    usage["output"] if usage else None,
+                    total,
+                    usage["input"] if usage else event["input_tokens"],
+                    usage["output"] if usage else event["output_tokens"],
+                    int(final),
                     identity,
                 ),
             )
@@ -590,12 +544,12 @@ class UsageStore:
                 account = self.account(db, scope, subject)
                 if usage is not None:
                     db.execute(
-                        "UPDATE usage_accounts SET used_tokens=used_tokens+?,token_reports=token_reports+1, "
+                        "UPDATE usage_accounts SET used_tokens=used_tokens+?,token_reports=token_reports+?, "
                         "remaining_tokens=CASE WHEN remaining_tokens IS NULL THEN NULL "
                         "ELSE MAX(0,remaining_tokens-?) END WHERE scope=? AND subject_id=?",
-                        (usage["total"], usage["total"], scope, subject),
+                        (delta, int(old is None), delta, scope, subject),
                     )
-                elif account["remaining_tokens"] is not None:
+                elif final and account["remaining_tokens"] is not None:
                     db.execute(
                         "UPDATE usage_accounts SET token_blocked=1 WHERE scope=? AND subject_id=?",
                         (scope, subject),

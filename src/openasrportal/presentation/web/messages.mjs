@@ -3,6 +3,27 @@ import { errorMessages } from './error-messages.mjs';
 
 // Only authored interface text is translated. Placeholders preserve user data.
 export const messages = {
+  'Proxy 代理': 'Proxy',
+  '使用全局 Proxy 代理': 'Use global Proxy',
+  '使用代理选项必须为布尔值': 'Use proxy must be a boolean.',
+  '代理设置字段无效': 'Invalid proxy settings fields.',
+  '代理地址须为不含凭据的 http:// 或 https://主机:端口': 'Enter an HTTP/HTTPS proxy host and port without credentials in the URL.',
+  '请同时填写代理用户名和密码，或同时留空清除认证': 'Supply both proxy username and password, or leave both empty to remove authentication.',
+  '代理上游连接已中断，请检查网络后重试': 'The proxied upstream disconnected. Check the network and retry.',
+  '此上游已启用代理，请先在 Proxy 设置中配置代理地址': 'This upstream requires a proxy. Configure an address in Proxy settings first.',
+  '代理连接或认证失败，请检查 Proxy 设置': 'Proxy connection or authentication failed. Check Proxy settings.',
+  '代理连接失败，请检查 Proxy 地址、证书和网络': 'Proxy connection failed. Check the address, certificate and network.',
+  '配置 Portal 访问上游的 HTTP/HTTPS 代理，并在每个上游档案中勾选使用代理。': 'Configure an HTTP/HTTPS proxy for Portal, then enable it in each upstream profile.',
+  '连接测试和新识别连接使用此设置；代理失败不会回退直连。地址留空可移除代理。': 'Connection tests and new recognition connections use these settings. Proxy failures never fall back to direct access. Leave the address empty to remove the proxy.',
+  '代理地址': 'Proxy address',
+  '更新代理认证': 'Update proxy authentication',
+  '代理用户名': 'Proxy username',
+  '代理密码': 'Proxy password',
+  '勾选后同时留空可清除认证；修改代理地址时会清除旧认证。凭据不会回显。': 'Select and leave both fields empty to clear authentication. Changing the address clears old authentication. Saved credentials are never displayed.',
+  '保存代理设置': 'Save proxy settings',
+  '已保存代理认证': 'Proxy authentication saved',
+  '未配置代理认证': 'No proxy authentication configured',
+  '代理设置已保存，新连接生效。': 'Proxy settings saved; they apply to new connections.',
   ...errorMessages,
   ...dynamicMessages,
   'OpenASRPortal · 管理设置': 'OpenASRPortal · Administration',
@@ -169,14 +190,14 @@ export const messages = {
   '按下游 Key 汇总': 'By client key',
   '按上游 ASR 汇总': 'By upstream ASR',
   计量口径: 'Metering definitions',
-  '下游时长按实际提交的 PCM 音频计算，不按连接等待时间计费。上游时长累计实际请求音频，HTTP 重复预览会重复计量；管理连接测试只计入上游。':
-    'Client duration counts submitted PCM audio, excluding connection wait time. Upstream duration counts all requested audio, including repeated HTTP previews. Management tests count only as upstream usage.',
+  '下游时长按实际提交的 PCM 音频计算；上游按上传音频计量，管理连接测试只计入上游。Soniox 云端按连接时长计费，与此本地音频预算不同。':
+    'Client duration counts submitted PCM; upstream duration counts uploaded audio. Management tests count only upstream. Soniox bills stream duration, which differs from this local audio budget.',
   '音频统计精度为分钟，查询边界按整分钟覆盖；配额扣减按 PCM16 样本计算，不按分钟取整。':
     'Statistics use minute buckets and cover whole minutes at query boundaries. Quotas count PCM16 samples without rounding to minutes.',
   'Token 只统计上游真实返回的 usage。未上报会明确标记；Token 限额不能用于不提供计量的上游。统计从新版本启用后开始，历史用量不会凭空补算。':
     'Token counts use reported upstream usage. Missing reports are marked explicitly; token quotas require a metered upstream. Statistics start when metering is enabled; earlier usage is not reconstructed.',
-  '当前限额是 Portal 本地预算，云平台的计费取整可能不同。Token 在请求返回后扣除，最后一个请求可能超过剩余 Token；到达限额后不会继续发起请求。':
-    'These are local Portal budgets; cloud billing may round differently. Tokens are deducted after each response, so the last request may exceed the remaining budget. No further requests start after the limit is reached.',
+  '当前限额是 Portal 本地预算。百炼 Token 按流式累计用量的增量扣除，最终结算可能超过剩余预算；到达限额后结束音频并等待最终结果。':
+    'These are local budgets. Bailian tokens debit cumulative stream usage by differences; final settlement may exceed the balance. At the limit, audio ends and Portal waits for final results.',
   '当前服务地址与凭据权限边界。': 'Current service address and credential permissions.',
   '当前 Portal 地址': 'Current Portal address',
   '管理 Key / 管理会话': 'Administrator password / session',

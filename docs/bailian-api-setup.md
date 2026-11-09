@@ -2,7 +2,7 @@
 
 **English** | [简体中文](bailian-api-setup.zh-CN.md)
 
-Create an Alibaba Cloud Model Studio (Bailian) workspace, authorize **`qwen-audio-3.1-asr-flash`**, and create an API key bound to that workspace for an upstream profile in OpenASRPortal **1.0.1**.
+Create an Alibaba Cloud Model Studio (Bailian) workspace, authorize **`qwen-audio-3.1-asr-flash-streaming`**, and create an API key bound to that workspace for an upstream profile in OpenASRPortal **1.1.0**.
 
 ## 1. Sign in to Model Studio
 
@@ -20,10 +20,10 @@ This guide uses **China (Beijing) / 华北 2（北京）**. Keep the workspace, 
 
 1. Open the new workspace in **Workspace management**.
 2. Open its **Model permissions and rate-limit settings (模型权限流控设置)** page.
-3. Search for the exact model name **`qwen-audio-3.1-asr-flash`**.
+3. Search for the exact model name **`qwen-audio-3.1-asr-flash-streaming`**.
 4. Enable **model invocation (模型调用)** and confirm that its status is **Authorized (已授权)**.
 
-Current Portal uses this exact model. Do not accidentally select a `-streaming`, `-message`, or `-filetrans` variant. If you cannot change authorization, contact the account or workspace administrator.
+The `-streaming` suffix is required. If you cannot change authorization, contact the account or workspace administrator.
 
 ## 4. Create and bind an API key
 
@@ -32,7 +32,7 @@ Current Portal uses this exact model. Do not accidentally select a `-streaming`,
 3. For the **owning workspace (归属业务空间)**, choose the workspace you just created and authorized. Select the owning account as requested and complete creation.
 4. Immediately copy and save the complete key. New keys are generally shown in full only once after creation.
 
-The key must **belong to the workspace whose model access you authorized**. If you additionally configure custom model permissions for the key, include `qwen-audio-3.1-asr-flash`.
+The key must **belong to the workspace whose model access you authorized**. If you additionally configure custom model permissions for the key, include `qwen-audio-3.1-asr-flash-streaming`.
 
 ## 5. Bind the API key to a Portal upstream
 
@@ -43,24 +43,24 @@ The key must **belong to the workspace whose model access you authorized**. If y
 | --- | --- |
 | Profile ID | For example, `bailian-main` |
 | Display name | For example, “Bailian speech recognition” |
-| Provider | Bailian · Qwen ASR Flash |
+| Provider | Bailian · Qwen ASR Streaming |
 | Upstream API key | The key bound to the new workspace; enter only the key |
-| HTTPS endpoint | This workspace's DashScope endpoint, as described below |
-| Model | Keep the read-only `qwen-audio-3.1-asr-flash` |
+| WebSocket endpoint | This workspace's DashScope WSS endpoint, as described below |
+| Model | Keep the read-only `qwen-audio-3.1-asr-flash-streaming` |
 | Other recognition options | Keep the defaults initially |
 
 Obtain the **Workspace ID** from this workspace's connection information in Model Studio. For Beijing, enter:
 
 ```text
-https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1
+wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference
 ```
 
-Replace `{WorkspaceId}`, including the braces, with the new workspace's ID, not its name. Portal automatically expands the recognition path. Use a **DashScope HTTP endpoint**, not the generic chat API's `/compatible-mode/v1`.
+Replace `{WorkspaceId}`, including the braces, with the new workspace's ID, not its name. Portal also completes the path on an official WSS root address. The older shared `wss://dashscope.aliyuncs.com/api-ws/v1/inference` domain remains accepted; workspace domains are recommended by Alibaba Cloud.
 
 For Singapore, use a workspace and key in that region and enter:
 
 ```text
-https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1
+wss://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/inference
 ```
 
 3. Select **Test upstream connection (测试上游连接)**, then **Save connection configuration (保存接入配置)** after success.
@@ -70,10 +70,14 @@ The Bailian API key is now bound to Portal's upstream. Select this profile in a 
 
 ## Billing and troubleshooting
 
-- **Billing:** this model charges for input and output tokens. Check current prices and free credit in Model Studio. Portal previews resubmit the current segment's audio; increasing the interval or disabling previews reduces these extra requests and usage.
+Portal sends `run-task`, waits for `task-started`, streams raw 16 kHz mono PCM16 once, and forwards upstream partial/final sentences. Ending sends `finish-task` and waits for `task-finished`. Server-side silence segmentation accepts 200–6000 ms (default 800). There is no local VAD, repeated HTTP recognition, preview interval, or HTTP fallback.
+
+Existing stored HTTP profiles are read as streaming profiles: the model and protocol/path migrate, the region, workspace, key, silence setting, profile ID and quota remain. Saving persists the upgraded settings. Grant the streaming model permission before use; migration cannot grant cloud permissions.
+
+- **Billing:** use current Model Studio pricing. Portal counts audio once and one request per task; cumulative token reports debit only their increase. The final task report settles the total. Token-limited streams sharing an account are serialized. Missing final usage blocks token-limited accounts until the budget is reset or token limits are removed; cancellation retains known usage. Final settlement may exceed the remaining budget.
 - **Model authorization error:** return to the new workspace and confirm that model invocation is **Authorized**, then verify that the key belongs to this workspace.
 - **Invalid key:** check that you copied the complete Model Studio API key, selected the correct region, and omitted any `Bearer` prefix.
-- **The endpoint cannot be saved or requests fail:** check the Workspace ID, region, and `/api/v1` path. Use the workspace endpoint matching the key.
+- **The endpoint cannot be saved or requests fail:** check the Workspace ID, region, WSS scheme and `/api-ws/v1/inference` path. Use the workspace endpoint matching the key.
 - **Client setup:** clients use an ASR key derived by Portal; the Bailian API key belongs in Portal's upstream settings. Save the profile after testing the connection.
 
 ## Official references
@@ -81,5 +85,5 @@ The Bailian API key is now bound to Portal's upstream. Select this profile in a 
 - [Workspace permission management](https://help.aliyun.com/zh/model-studio/permission-management-overview)
 - [Obtain and configure an API key](https://help.aliyun.com/zh/model-studio/get-api-key)
 - [Regions and endpoints](https://help.aliyun.com/zh/model-studio/regions)
-- [`qwen-audio-3.1-asr-flash` model details and pricing](https://help.aliyun.com/zh/model-studio/qwen-audio-3-1-asr-flash)
-- [Qwen-Audio-ASR HTTP API](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-http-api)
+- [Streaming WebSocket connection](https://help.aliyun.com/en/model-studio/qwen-audio-asr-streaming-websocket-api)
+- [Client events](https://help.aliyun.com/en/model-studio/qwen-audio-asr-streaming-client-events) · [Server events](https://help.aliyun.com/en/model-studio/qwen-audio-asr-streaming-server-events)
