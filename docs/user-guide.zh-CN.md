@@ -4,17 +4,27 @@
 
 ## HTTP/HTTPS 代理
 
+“测试代理”使用当前填写的设置，不会保存。可选择 HTTPS 测试目标（默认 `https://example.com/`）；面板显示是否可用及完整请求耗时，包含代理连接、TLS 和目标响应。成功只证明该目标可达，不代表所有 ASR 提供商可用。修改设置会清除显示结果；仅在代理地址相同时复用已保存认证。
+
 原生安装包自带兼容的私有运行时；源码安装使用 HTTPS 代理需 Python 3.11+（HTTP 代理也支持 Python 3.10）。
 
 在 Portal 管理页面打开 **Proxy 代理**，保存 `http://` 或 `https://` 代理地址。认证信息单独填写；勾选“更新代理认证”可替换凭据，同时留空可清除认证。已保存凭据加密存储且不回显。修改代理地址会清除旧认证，除非同时填写新凭据。
 
 在每个上游档案中勾选“使用全局 Proxy 代理”并保存，所有提供商的连接测试和新识别连接均遵循此选择。代理不可用或未配置时直接报错，不会绕过代理；未勾选的档案直连。全局地址留空可移除代理；已建立的识别连接保持原路径。HTTPS 表示连接代理本身也使用 TLS，WSS 流量还会校验上游证书；私有代理证书应加入服务所在机器的受信任 CA 存储。
 
-适用版本：**1.1.0**。本文面向安装服务、配置识别上游和管理客户端的用户。客户端开发见 [识别 API](API.zh-CN.md)，自动化管理见 [管理协议](MANAGEMENT.zh-CN.md)。项目采用 [GPL v3](../LICENSE)。
+适用版本：**1.1.1**。本文面向安装服务、配置识别上游和管理客户端的用户。客户端开发见 [识别 API](API.zh-CN.md)，自动化管理见 [管理协议](MANAGEMENT.zh-CN.md)。项目采用 [GPL v3](../LICENSE)。
 
 服务开通、API Key 获取及对应的 Portal 填写步骤分别见 [豆包语音 API 开通指南](doubao-api-setup.zh-CN.md)和 [阿里云百炼 API 开通指南](bailian-api-setup.zh-CN.md)。
 
 ## 1. 软件的逻辑架构
+
+### 设置控件
+
+管理页和首次设置页右上角使用 **中文 / English** 下拉框，切换语言保留未保存字段。刷新图标会重新加载页面，并返回当前分类。
+
+每个上游以独立描边面板展示带标签的只读字段。“修改”解锁当前面板，“保存”应用更改，“取消”恢复已保存值；提供商固定字段和配置 ID 始终只读。密钥不回显，已有密钥留空时保留原值。“启用”开关即时生效，“使用全局 Proxy 代理”随档案编辑并保存。测试使用当前显示的配置（包括未保存的代理选择），在本面板内显示连接路径、结果和耗时。
+
+新建 Soniox 档案默认英文、中文提示（`en,zh`）。百炼和 Boson 默认自动识别，包含英文、中文，也可选择单一语种。已有档案保留其保存的语言选择。
 
 ### 1.1 Portal 在系统中的位置
 
@@ -58,7 +68,7 @@ Windows 常规使用原生 MSI 服务；Linux 单机可用 deb，需要容器化
 
 ### 2.2 Windows：安装系统服务
 
-1. 运行 `OpenASRPortal_1.1.0_windows_amd64.msi`，按向导授权安装服务。
+1. 运行 `OpenASRPortal_1.1.1_windows_amd64.msi`，按向导授权安装服务。
 2. 在浏览器打开 `http://127.0.0.1:10087/admin`。若端口已被占用，先确认是否已有 Portal 实例，避免初始化到错误服务。
 3. 完成第 2.5 节的首次密码、上游和客户端设置。
 4. 通过 Windows“服务”查看 OpenASRPortal 的运行状态。关闭浏览器不会停止服务。
@@ -74,7 +84,7 @@ Windows 常规使用原生 MSI 服务；Linux 单机可用 deb，需要容器化
 在下载目录执行，ARM64 替换为对应文件：
 
 ```bash
-sudo apt install ./OpenASRPortal_1.1.0_linux_amd64.deb
+sudo apt install ./OpenASRPortal_1.1.1_linux_amd64.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
@@ -87,7 +97,7 @@ curl http://127.0.0.1:10087/health
 
 ### 2.4 Linux：Docker 镜像包
 
-解压对应架构的 `OpenASRPortal_1.1.0_linux_amd64.tar.gz`，进入包内 `OpenASRPortal` 目录：
+解压对应架构的 `OpenASRPortal_1.1.1_linux_amd64.tar.gz`，进入包内 `OpenASRPortal` 目录：
 
 ```bash
 docker load -i image.tar

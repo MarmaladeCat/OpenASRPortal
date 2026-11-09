@@ -2,6 +2,8 @@
 
 [English](development.md) | **简体中文**
 
+构建间保留 `.cache/build/portable/<架构>/` 和工具链镜像。冻结运行时复用核验代码/资源、配方/版本、不可变镜像 ID、Python/CPU 和每个文件哈希/权限；仅改文档仍重新打包并生成当前来源记录。输入变化或缓存损坏会重新冻结。Windows 在 `.cache/windows/wheels/` 保存经过哈希核验的完整 wheelhouse，以依赖及目标 Python/架构为键，使用 `--no-index` 离线安装。保留 Python/WinSW 下载和通用 jieba wheel，需要刷新依赖时才显式删除 wheelhouse。一次性打包暂存可清理，数据库和模型目录不是构建缓存。
+
 旧百炼 HTTP 档案读取时规范化为流式模型及 WSS 路径，保存时持久化；不要重新引入 HTTP 预览请求。流式用量按任务累计，不是每事件独立用量；保留历史数据库预留列兼容，但新流不使用。Soniox 稳定词只累积一次，临时词替换后缀；端点/结束定稿不能重复文字。协议修改需配套提供商测试和双语配置契约。
 
 本服务源码使用 Python 3.10+、aiohttp 与本产品 SQLite。无需 Electron 或模型运行时；浏览器回归的工具另行安装。协议参考 [客户端 API](API.zh-CN.md) 和 [管理 API](MANAGEMENT.zh-CN.md)。
@@ -40,7 +42,7 @@ python scripts/build.py --deployment windows --arch amd64 --wix-bin <WiX目录>
 
 deb 使用 Ubuntu 22.04 / SHA256 固定的 Python 3.12.10 / PyInstaller 6.16.0；镜像使用 Python 3.12.10 / Debian 12。DEB 私有解释器支持 HTTPS 代理双层 TLS，并保持 Ubuntu 22.04 的 libc 基线。源码安装使用 HTTPS 代理需 Python 3.11+。MSI 构建编排使用原生 Windows Python 3.12.10 与 WiX 3.14.1，包内私有运行时为 Python 3.13.16、服务包装器 WinSW 2.12.0。构建配方在 packaging/，入口再调用 `build_portable_deb.py`、`build_image.py` 或 `build_windows.py`，不依赖外层源码。
 
-候选在 `.cache/build/artifacts/<系统>/<架构>/<变体>/`，发布到 `release/1.1.0/`。VERSION 与工具包版本均为 1.1.0。目录平铺 deb、镜像部署包、MSI、文档 ZIP、中英文 README、manifest.json 与 SHA256SUMS；Docker 包包含真实 image.tar 和手写部署说明。dist/ 不作为输出目录。
+候选在 `.cache/build/artifacts/<系统>/<架构>/<变体>/`，发布到 `release/1.1.1/`。VERSION 与工具包版本均为 1.1.1。目录平铺 deb、镜像部署包、MSI、文档 ZIP、中英文 README、manifest.json 与 SHA256SUMS；Docker 包包含真实 image.tar 和手写部署说明。dist/ 不作为输出目录。
 
 发布器检查来源、唯一候选、版本、架构和哈希后替换目录，同源的其他平台产物合并保留。构建成功不代表已完成服务安装、升级、卸载或真实识别验收；运行记录放 test-results/。
 

@@ -52,6 +52,17 @@ export function translate(text, depth = 0) {
 
 export const confirm = (message) => window.confirm(translate(message));
 export const currentLanguage = () => language;
+// Cloning translated forms must retain the authored source for later language changes.
+export function cloneLocalized(node) {
+  const clone = node.cloneNode(false);
+  if (node.nodeType === Node.TEXT_NODE) clone.data = originals.get(node)?.source ?? node.data;
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    for (const [name, record] of Object.entries(attributes.get(node) || {}))
+      clone.setAttribute(name, record.source);
+  }
+  for (const child of node.childNodes) clone.appendChild(cloneLocalized(child));
+  return clone;
+}
 export function userOption(title, value) {
   const option = new Option(title, value);
   option.translate = false;
@@ -116,18 +127,16 @@ function select(value, persist = true) {
       /* Keep this tab usable. */
     }
   }
-  document
-    .querySelectorAll('[data-language]')
-    .forEach((button) =>
-      button.setAttribute('aria-pressed', String(button.dataset.language === value))
-    );
+  document.querySelectorAll('[data-language-select]').forEach((control) => {
+    control.value = value;
+  });
   render();
   document.dispatchEvent(new CustomEvent('languagechange', { detail: value }));
 }
 
 document
-  .querySelectorAll('[data-language]')
-  .forEach((button) => button.addEventListener('click', () => select(button.dataset.language)));
+  .querySelectorAll('[data-language-select]')
+  .forEach((control) => control.addEventListener('change', () => select(control.value)));
 window.addEventListener('storage', (event) => {
   if (event.key === storageKey && event.newValue) select(event.newValue, false);
 });

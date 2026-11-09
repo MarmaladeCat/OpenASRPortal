@@ -65,7 +65,7 @@ def config_defaults(name):
 def provider_defaults(name):
     if name == SONIOX_MODEL:
         return {"endpoint": SONIOX_ENDPOINT, "model": SONIOX_ASR_MODEL,
-                "language": "auto", "endpointDelayMs": 2000}
+                "language": "en,zh", "endpointDelayMs": 2000}
     if name == BOSON_MODEL:
         return {
             "endpoint": BOSON_ENDPOINT,
@@ -132,8 +132,8 @@ def validate_config(name, patch, previous=None):
             raise ValueError("请使用 Soniox 官方实时 WebSocket 端点")
         if config["model"] != SONIOX_ASR_MODEL:
             raise ValueError("此适配器使用 " + SONIOX_ASR_MODEL)
-        if not isinstance(config["language"], str) or not re.fullmatch(r"auto|[a-z]{2}", config["language"]):
-            raise ValueError("Soniox 语种须为 auto 或两位小写语言代码")
+        if not isinstance(config["language"], str) or not re.fullmatch(r"auto|[a-z]{2}(,[a-z]{2}){0,9}", config["language"]):
+            raise ValueError("Soniox 语种须为 auto 或逗号分隔的两位小写语言代码")
         if type(config["endpointDelayMs"]) is not int or not 500 <= config["endpointDelayMs"] <= 3000:
             raise ValueError("Soniox 端点延迟应为 500–3000 毫秒")
         return config

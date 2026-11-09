@@ -6,7 +6,7 @@ Create an API key in the [Soniox console](https://console.soniox.com/) and enabl
 
 - Provider ID: `soniox_realtime`; model: `stt-rt-v6`.
 - Endpoint: `wss://stt-rt.soniox.com/transcribe-websocket` (read-only).
-- Language: `auto`, or a supported two-letter hint such as `zh` / `en`. Hints do not restrict recognition to that language.
+- Language: new profiles default to English and Chinese (`en,zh`). Choose automatic detection or a language in the dropdown; the API also accepts up to ten comma-separated two-letter hints. Saved selections are retained. Hints do not restrict recognition to those languages.
 - Maximum endpoint delay: 500–3000 ms, default 2000. This caps semantic endpoint waiting after speech, not network or total response latency.
 
 Portal authenticates with a Bearer header during the WebSocket handshake, sends configuration followed by raw 16 kHz mono PCM16, and forwards real partial text. Stable tokens accumulate once; provisional tokens replace the current suffix. An `<end>` marker finalizes a segment. End-of-audio sends an empty text frame and waits for `finished: true`; final tokens are flushed once. Cancellation closes the stream without inventing a final transcript. Idle connections send keepalive messages; errors and finish timeouts remain errors.

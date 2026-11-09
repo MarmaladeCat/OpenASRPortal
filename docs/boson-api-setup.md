@@ -6,13 +6,15 @@ Portal uses Boson's Higgs Realtime WebSocket with `higgs-stt-3.1` input transcri
 
 ## Account and configuration
 
-1. Follow Boson's [account setup](https://docs.boson.ai/set-up-your-account) to create an API key and enable sufficient credit/model access.
+1. Sign in at [Boson workspace](https://www.boson.ai/workspace), complete account verification, then open [API Keys](https://www.boson.ai/workspace/api-key) and select **Create API Key**. Copy the complete `bai-…` key when shown. Follow [account setup](https://docs.boson.ai/set-up-your-account) for current requirements. Claim any eligible trial credit explicitly on the API Keys or billing page; creating an account/key alone does not add credit. Otherwise fund the account and verify model access.
 2. Open Portal `/admin`, sign in, and choose **Upstream ASR → Add service connection**.
 3. Select **Boson AI · Higgs STT**, give the profile a unique ID/name, and enter the key without a `Bearer` prefix.
 4. Keep the read-only endpoint `wss://api.boson.ai/v1/realtime` and transcription model `higgs-stt-3.1`. The adapter sets the underlying session model to `higgs-realtime` automatically.
-5. Use `auto` for language detection, or an ISO-639-1 hint such as `zh` or `en`. Boson may ignore unrecognized language hints. Set segmentation silence to 600–3000 ms (default 800 ms).
-6. Test the upstream connection, then save. The test commits 200 ms of silence and waits for a transcription response, consuming a small amount of usage. It verifies model access rather than just the socket handshake.
+5. Use `auto` for automatic Chinese/English recognition, or one ISO-639-1 hint such as `zh` or `en`. Do not enter `en,zh`: this adapter accepts one hint, unlike Soniox. Boson may ignore unrecognized language hints. Set segmentation silence to 600–3000 ms (default 800 ms).
+6. Choose **Use proxy** before testing. If enabled, first save and test the global HTTP/HTTPS proxy in **Settings**; it must be reachable from the Portal backend. Existing cards require **Edit** to change fields. The upstream test uses the current unsaved form and proxy switch, reports inside the panel, commits 200 ms of silence and waits for a transcription response. It consumes a small amount of usage and checks model access, not just the socket handshake. Select **Save** after success; **Cancel** discards edits.
 7. Set the profile as default or select it explicitly in a client. Clients still use a Portal-issued ASR key.
+
+Leave the saved card **Enabled**. The page-language dropdown does not change the recognition language. Verify a Chinese and an English phrase in the client, pausing or stopping to receive each final segment. Proxy availability and recognition connection tests have different scopes; an unavailable enabled proxy never falls back to a direct connection.
 
 ## Recognition behavior
 
@@ -25,6 +27,8 @@ Portal uses Boson's Higgs Realtime WebSocket with `higgs-stt-3.1` input transcri
 ## Troubleshooting and references
 
 For authentication/model errors, check the key, model permissions, balance, and backend network access to Boson. No text until a pause is expected; continuous speech is forcibly segmented at 15 seconds. A successful connection test does not establish microphone accuracy or native input acceptance.
+
+`429 insufficient_quota` can mean the trial credit has not been claimed or the balance is empty; check [billing](https://www.boson.ai/workspace/billing/overview). A rate-limit error instead requires checking concurrency/request limits. `401` calls for checking the complete key without a `Bearer` prefix. For proxy timeout/CONNECT errors, check the configured proxy from the Portal host before changing model settings.
 
 Latency has separate stages: connection/session setup, waiting for a speech boundary, and commit-to-final transcription. The 800 ms default silence boundary adds to upstream time while recording; `audio.end` commits immediately after any pending turn. There are no word-by-word previews. Background noise above the local energy threshold can keep a turn open until the 15-second limit; check microphone level/noise before reducing silence (minimum 600 ms). A slow pending transcript also holds subsequent audio uploads to prevent lost turns.
 

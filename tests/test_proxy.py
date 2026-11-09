@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
+from aiohttp import web
 from aiohttp.test_utils import TestServer
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -26,6 +27,17 @@ from openasrportal.storage.store import Store
 
 
 class ProxyStorageTests(unittest.TestCase):
+    def test_draft_test_settings_do_not_persist_or_reuse_credentials_on_new_host(self):
+        with tempfile.TemporaryDirectory(dir="test-results") as directory:
+            store = Store(directory)
+            saved = {"url": "http://proxy.example:8080", "username": "user", "password": "fictional"}
+            store.proxy.save(saved)
+            self.assertEqual(store.proxy.runtime({"url": saved["url"]}), saved)
+            self.assertEqual(store.proxy.runtime({"url": "http://other.example:8080"}),
+                             {"url": "http://other.example:8080"})
+            self.assertEqual(store.proxy.runtime({"username": "", "password": ""}), {"url": saved["url"]})
+            self.assertEqual(store.proxy.runtime(), saved)
+
     def test_persistence_redaction_validation_and_credential_rotation(self):
         with tempfile.TemporaryDirectory(dir="test-results") as directory:
             store = Store(directory)
@@ -144,15 +156,23 @@ class ProxyTransportTests(unittest.IsolatedAsyncioTestCase):
             for stream in (remote, writer):
                 if stream:
                     stream.close()
+            await asyncio.gather(
+                *(stream.wait_closed() for stream in (remote, writer) if stream),
+                return_exceptions=True,
+            )
             self.tasks.discard(task)
 
     async def asyncTearDown(self):
         self.release.set()
         for session in self.sessions:
             self.assertTrue(session.closed, "proxy session leaked")
-        for task in list(self.tasks):
-            task.cancel()
-        await asyncio.gather(*self.tasks, return_exceptions=True)
+        if self.tasks:
+            # Let EOF-driven tunnel cleanup finish before cancellation; cancelling
+            # a task already in its finally block can interrupt socket closure.
+            _, pending = await asyncio.wait(self.tasks, timeout=1)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
         self.upstream.close()
         await self.upstream.wait_closed()
         self.patcher.stop()
@@ -180,6 +200,66 @@ class ProxyTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("upstream-only", self.requests[-1])
             self.assertNotIn("proxy-authorization", self.upstream_headers[-1])
             self.assertEqual(self.upstream_headers[-1]["authorization"], "Bearer upstream-only")
+
+    async def test_proxy_availability_measures_https_request_and_never_falls_back(self):
+        target = web.Application()
+        async def health(request):
+            self.assertNotIn('Proxy-Authorization', request.headers)
+            return web.Response(text='ready')
+        target.router.add_get('/', health)
+        server = TestServer(target)
+        await server.start_server(ssl=self.tls)
+        self.target_port = server.port
+        try:
+            for scheme in ('http', 'https'):
+                proxy = await asyncio.start_server(self.tunnel, '127.0.0.1', 0,
+                    ssl=self.tls if scheme == 'https' else None)
+                async with proxy:
+                    settings = {'url': f'{scheme}://localhost:{proxy.sockets[0].getsockname()[1]}',
+                                'username': 'proxy-user', 'password': 'fictional-secret'}
+                    result = await transport.test_proxy(settings, f'https://localhost:{server.port}/')
+                    self.assertTrue(result['ok'], result)
+                    self.assertEqual(result['status'], 200)
+                    self.assertGreaterEqual(result['latencyMs'], 0)
+                    self.assertIn('Proxy-Authorization: Basic ', self.requests[-1])
+                    self.status = 407
+                    result = await transport.test_proxy(settings, f'https://localhost:{server.port}/')
+                    self.assertFalse(result['ok'])
+                    self.assertNotIn('fictional-secret', json.dumps(result))
+                    self.status = 200
+            for target in ('http://localhost/', 'https://user:secret@localhost/', '', None):
+                with self.assertRaises(ValueError):
+                    await transport.test_proxy(settings, target)
+        finally:
+            await server.close()
+
+    async def test_proxy_management_requires_admin_and_preserves_saved_configuration(self):
+        store = Store(Path(self.directory.name) / 'proxy-admin')
+        saved = {'url': 'http://proxy.example:8080', 'username': 'user', 'password': 'fictional'}
+        store.proxy.save(saved)
+        portal = portal_for_tests(store, 'client-key', 'admin-key')
+        server = TestServer(portal.app())
+        await server.start_server()
+        try:
+            async with aiohttp.ClientSession() as client:
+                url = server.make_url('/v1/admin/proxy/test')
+                for headers in ({}, {'Authorization': 'Bearer client-key'}):
+                    async with client.post(url, json={}, headers=headers) as response:
+                        self.assertEqual(response.status, 401)
+                headers = {'Authorization': 'Bearer ' + fixture_token(portal, 'admin-key')}
+                with patch('openasrportal.api.server.test_proxy', AsyncMock(return_value={
+                    'ok': True, 'latencyMs': 12, 'status': 200,
+                })) as probe:
+                    async with client.post(url, json={'proxy': {'url': saved['url']},
+                        'target': 'https://example.com/'}, headers=headers) as response:
+                        self.assertTrue((await response.json())['ok'])
+                    probe.assert_awaited_once_with(saved, 'https://example.com/')
+                self.assertEqual(store.proxy.runtime(), saved)
+                for invalid in ({'proxy': None}, {'proxy': {'unknown': True}}, {'target': 'http://example.com/'}):
+                    async with client.post(url, json=invalid, headers=headers) as response:
+                        self.assertEqual(response.status, 400)
+        finally:
+            await server.close()
 
     async def test_rejection_missing_proxy_timeout_and_cancellation_never_fall_back(self):
         with patch.object(transport, "direct_connect", AsyncMock()) as direct:
@@ -250,6 +330,14 @@ class ProxyTransportTests(unittest.IsolatedAsyncioTestCase):
                                                headers=admin) as response:
                             self.assertTrue((await response.json())["ok"])
                         self.assertEqual(len(self.requests), 1)
+                        direct_connect = transport.direct_connect
+                        with patch.object(transport, 'direct_connect',
+                            side_effect=lambda *args, **kwargs: direct_connect(*args, ssl=self.trust, **kwargs)):
+                            async with client.post(server.make_url('/v1/admin/profiles/local/test'),
+                                headers=admin, json={'configuration': {'useProxy': False}}) as response:
+                                self.assertTrue((await response.json())['ok'])
+                        self.assertEqual(len(self.requests), 1, 'An unsaved direct probe must bypass the proxy')
+                        self.assertTrue(store.get('local')['configuration']['useProxy'])
                         async with client.post(server.make_url("/v1/sessions"), json={"profileId": "local"},
                                                headers={"Authorization": "Bearer client-key"}) as response:
                             session = await response.json()

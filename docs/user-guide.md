@@ -4,17 +4,27 @@
 
 ## HTTP/HTTPS proxy
 
+**Test proxy** checks the currently entered settings without saving them. Choose an HTTPS test target (default `https://example.com/`); the panel shows availability and total request time, including proxy connection, TLS and the target response. A successful test verifies that target, not every ASR provider. Editing settings clears the displayed result. Saved authentication is reused only for the same proxy address.
+
 Native packages include a compatible private runtime. Source installations need Python 3.11+ for HTTPS proxies (HTTP proxies also work on Python 3.10).
 
 Open **Proxy** in Portal administration and save an `http://` or `https://` proxy address. Optional authentication is entered separately; select **Update proxy authentication** to replace it, or leave both credential fields empty to remove it. Saved credentials are encrypted and never displayed. Changing the proxy address clears old authentication unless you provide new credentials.
 
 In each upstream profile, select **Use global Proxy** and save. The selection applies to connection tests and new recognition connections for every provider. An unavailable or missing proxy produces an error rather than bypassing it. Unselected profiles connect directly. An empty global address removes the proxy; already-established recognition connections keep their route. HTTPS means TLS to the proxy itself; WSS traffic also verifies the upstream certificate. Use the service machine's trusted CA store for private proxy certificates.
 
-Version **1.1.0**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
+Version **1.1.1**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
 
 For service activation, API keys, and matching Portal settings, see the separate [Doubao Speech](doubao-api-setup.md) and [Alibaba Cloud Model Studio](bailian-api-setup.md) setup guides.
 
 ## 1. Logical architecture
+
+### Settings controls
+
+Use the upper-right **中文 / English** dropdown in administration and first-time setup. Switching languages keeps unsaved fields. The refresh icon reloads the page and returns to the selected section.
+
+Each upstream has a separate outlined panel with labeled, read-only fields. **Edit** unlocks that panel; **Save** applies changes and **Cancel** restores its saved values. Fixed provider fields and profile IDs stay read-only. Keys remain concealed; an empty existing-key field retains its value. The **Enabled** switch applies immediately; **Use global Proxy** is edited and saved with the profile. Tests use the currently displayed configuration, including unsaved proxy selection, and report the route, result and elapsed time inside that panel.
+
+New Soniox profiles default to English and Chinese hints (`en,zh`). Bailian and Boson default to automatic language detection, including English and Chinese; their single-language options remain available. Existing saved language selections are retained.
 
 ### 1.1 Portal's position
 
@@ -58,7 +68,7 @@ Native packages include private Python; images include service runtimes, but nei
 
 ### 2.2 Windows service installation
 
-1. Run `OpenASRPortal_1.1.0_windows_amd64.msi` and authorize service installation.
+1. Run `OpenASRPortal_1.1.1_windows_amd64.msi` and authorize service installation.
 2. Open http://127.0.0.1:10087/admin. If occupied, identify the existing instance before initializing the wrong service.
 3. Complete password/upstream/client setup in §2.5.
 4. Check OpenASRPortal in Windows Services. Closing the browser does not stop it.
@@ -74,7 +84,7 @@ Windows 11 amd64 service extracted from 1.0.0 MSI, with temporary data/demo prof
 In the download directory, substituting ARM64 when needed:
 
 ```bash
-sudo apt install ./OpenASRPortal_1.1.0_linux_amd64.deb
+sudo apt install ./OpenASRPortal_1.1.1_linux_amd64.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
@@ -87,7 +97,7 @@ Captured from version 1.0 source on Linux amd64, initialized with a demo LocalAS
 
 ### 2.4 Linux Docker bundle
 
-Extract `OpenASRPortal_1.1.0_linux_amd64.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
+Extract `OpenASRPortal_1.1.1_linux_amd64.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
 
 ```bash
 docker load -i image.tar

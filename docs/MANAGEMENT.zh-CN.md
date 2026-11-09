@@ -21,6 +21,7 @@ HTTP JSON，管理请求携带 `Authorization: Bearer <管理会话令牌>`，�
 | PUT       | /v1/admin/profiles/{id}         | 幂等保存指定 id，便于部署注册                      |
 | DELETE    | /v1/admin/profiles/{id}         | 删除配置；重复删除幂等                             |
 | POST      | /v1/admin/profiles/{id}/test    | 测试保存配置或请求体中的草稿，不持久化             |
+| POST      | /v1/admin/proxy/test           | 仅管理员可用的代理可用性与请求耗时测试             |
 | GET/PATCH | /v1/admin/settings              | 查看/设置 defaultProfileId                         |
 | GET/POST  | /v1/admin/asr-keys              | 读取脱敏 Key 列表 / 派生命名的 ASR Key             |
 | DELETE    | /v1/admin/asr-keys/{id}         | 永久撤销该 Key，取消它的识别会话                   |
@@ -82,6 +83,8 @@ min/max/step、options、valueType=number 和 retainWhenOmitted。
 消费者按字段契约渲染，不复制 Portal 内部提供商校验和默认值代码。
 
 ## 默认与会话
+
+契约通过 `proxyTestPath` 提供代理测试地址。`POST /v1/admin/proxy/test` 接受 `{proxy?: {url?, username?, password?}, target?: "https://example.com/"}`。省略代理设置时使用已保存配置；提供字段时按保存时的验证与凭据保留规则合并，但不写入存储。目标必须为不带凭据或片段的 HTTPS 地址。服务经代理发送 GET，验证证书、不跟随重定向、10 秒超时。响应包含 `ok`、`latencyMs`、收到响应时的 HTTP `status`，以及失败时脱敏的 `error`。HTTP 200–399 视为可用。不发送 ASR 凭据或音频，也不扣除 ASR 配额。
 
 ### 上游代理
 

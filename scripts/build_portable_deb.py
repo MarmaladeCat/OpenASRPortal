@@ -36,6 +36,9 @@ def main():
     output = args.output.resolve() if args.output else ROOT / ".cache/build/artifacts/linux" / args.arch / "service"
     work.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
+    image_id = subprocess.check_output(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", image], text=True
+    ).strip()
     commands = [
         ["python", "/source/scripts/build_runtime.py"],
         [
@@ -65,13 +68,15 @@ def main():
             "HOME=/tmp",
             "-e",
             "OPENASRPORTAL_BUILD_DIR=/build",
+            "-e",
+            "OPENASR_BUILD_IMAGE=" + image_id,
             "-v",
             f"{ROOT}:/source:ro",
             "-v",
             f"{work}:/build",
             "-v",
             f"{output}:/artifacts",
-            image,
+            image_id,
             "python",
             "-c",
             code,

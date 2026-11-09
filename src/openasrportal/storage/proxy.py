@@ -17,14 +17,14 @@ class ProxySettings:
         value = self.stored()
         return {"url": value["url"], "hasCredentials": bool(value["credentials"])}
 
-    def runtime(self):
-        value = self.stored()
+    def runtime(self, patch=None):
+        value = self.stored() if patch is None else self.prepare(patch)
         credentials = value.pop("credentials")
         if credentials:
             value.update(json.loads(self.store.vault.decrypt(credentials)))
         return value
 
-    def save(self, patch):
+    def prepare(self, patch):
         if not isinstance(patch, dict) or patch.keys() - {"url", "username", "password"}:
             raise ValueError("代理设置字段无效")
         value = self.stored()
@@ -59,6 +59,10 @@ class ProxySettings:
         value["url"] = url
         if not url:
             value["credentials"] = ""
+        return value
+
+    def save(self, patch):
+        value = self.prepare(patch)
         with self.store.connection() as db:
             db.execute("INSERT OR REPLACE INTO settings VALUES ('proxy', ?)", (json.dumps(value),))
         return self.public()

@@ -16,12 +16,35 @@
           <p>上游识别服务接入 · 下游客户端授权</p>
         </div>
         <div class="header-actions">
-          <div class="language-switch" role="group" aria-label="Language / 语言" translate="no">
-            <button type="button" data-language="zh-CN" lang="zh-CN">中文</button>
-            <button type="button" data-language="en" lang="en">English</button>
-          </div>
+          <select
+            class="language-switch"
+            data-language-select
+            aria-label="Language / 语言"
+            translate="no"
+          >
+            <option value="zh-CN" lang="zh-CN">中文</option>
+            <option value="en" lang="en">English</option>
+          </select>
           <span id="connection-badge" class="badge">未连接</span
-          ><button id="refresh" type="button">刷新</button
+          ><button
+            id="refresh"
+            class="icon-button"
+            type="button"
+            title="刷新页面"
+            aria-label="刷新页面"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M20 7v5h-5M4 17v-5h5" />
+              <path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" />
+            </svg></button
           ><button id="logout" type="button" hidden>退出管理</button>
         </div>
       </header>
@@ -100,8 +123,16 @@
           >
             <span>⌁</span>访问与权限
           </button>
-          <button id="tab-proxy" data-page="proxy" role="tab" aria-controls="page-proxy"
-            aria-selected="false" tabindex="-1"><span>⇄</span>Proxy 代理</button>
+          <button
+            id="tab-proxy"
+            data-page="proxy"
+            role="tab"
+            aria-controls="page-proxy"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            <span>⇄</span>Proxy 代理
+          </button>
           <div class="nav-note"><span class="dot"></span>Management v1</div>
         </nav>
         <main id="admin-body">
@@ -112,15 +143,49 @@
               <p>连接测试和新识别连接使用此设置；代理失败不会回退直连。地址留空可移除代理。</p>
             </div>
             <form id="proxy-form" class="editor-card" autocomplete="off">
-              <label>代理地址<input id="proxy-url" type="url" placeholder="http://proxy.example.com:8080" /></label>
+              <label
+                >代理地址<input
+                  id="proxy-url"
+                  type="url"
+                  placeholder="http://proxy.example.com:8080"
+              /></label>
               <p id="proxy-auth-status" class="hint"></p>
-              <label class="check"><input id="proxy-update-auth" type="checkbox" />更新代理认证</label>
+              <label class="check"
+                ><input id="proxy-update-auth" type="checkbox" />更新代理认证</label
+              >
               <div class="two-columns">
-                <label>代理用户名<input id="proxy-username" autocomplete="off" maxlength="1024" disabled /></label>
-                <label>代理密码<input id="proxy-password" type="password" autocomplete="new-password" maxlength="1024" disabled /></label>
+                <label
+                  >代理用户名<input
+                    id="proxy-username"
+                    autocomplete="off"
+                    maxlength="1024"
+                    disabled
+                /></label>
+                <label
+                  >代理密码<input
+                    id="proxy-password"
+                    type="password"
+                    autocomplete="new-password"
+                    maxlength="1024"
+                    disabled
+                /></label>
               </div>
-              <p class="hint">勾选后同时留空可清除认证；修改代理地址时会清除旧认证。凭据不会回显。</p>
+              <p class="hint">
+                勾选后同时留空可清除认证；修改代理地址时会清除旧认证。凭据不会回显。
+              </p>
               <button id="proxy-save" class="primary" type="submit">保存代理设置</button>
+              <label
+                >测试目标（HTTPS）<input
+                  id="proxy-target"
+                  type="url"
+                  value="https://example.com/"
+                  required
+              /></label>
+              <p class="hint">
+                测试当前填写的代理设置，不会保存；延迟为经代理访问目标的完整请求耗时。
+              </p>
+              <button id="proxy-test" type="button">测试代理</button>
+              <p id="proxy-result" class="probe-result" role="status">尚未测试</p>
             </form>
           </section>
           <section id="page-overview" class="page" role="tabpanel" aria-labelledby="tab-overview">
@@ -205,6 +270,7 @@
                   ><button id="cancel" type="button">取消</button>
                 </div>
               </form>
+              <p id="editor-result" class="probe-result" role="status">尚未测试</p>
             </section>
             <p class="hint">
               这里的上游 Key 由 Portal 连接服务时使用，不分发给输入法或其他客户端。
@@ -478,7 +544,8 @@
               <strong>计量口径</strong>
               <p>
                 下游时长按实际提交的 PCM
-                音频计算；上游按上传音频计量，管理连接测试只计入上游。Soniox 云端按连接时长计费，与此本地音频预算不同。
+                音频计算；上游按上传音频计量，管理连接测试只计入上游。Soniox
+                云端按连接时长计费，与此本地音频预算不同。
               </p>
               <p>
                 音频统计精度为分钟，查询边界按整分钟覆盖；配额扣减按 PCM16 样本计算，不按分钟取整。
@@ -488,7 +555,8 @@
                 限额不能用于不提供计量的上游。统计从新版本启用后开始，历史用量不会凭空补算。
               </p>
               <p>
-                当前限额是 Portal 本地预算。百炼 Token 按流式累计用量的增量扣除，最终结算可能超过剩余预算；到达限额后结束音频并等待最终结果。
+                当前限额是 Portal 本地预算。百炼 Token
+                按流式累计用量的增量扣除，最终结算可能超过剩余预算；到达限额后结束音频并等待最终结果。
               </p>
             </div>
           </section>

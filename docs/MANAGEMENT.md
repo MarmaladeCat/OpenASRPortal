@@ -16,6 +16,7 @@ The public management protocol shared by the web UI, OpenNotes, and OpenDrafts, 
 | PUT       | /v1/admin/profiles/{id}         | Idempotent save by id for deployment registration              |
 | DELETE    | /v1/admin/profiles/{id}         | Idempotent deletion                                            |
 | POST      | /v1/admin/profiles/{id}/test    | Test saved profile or body draft without persistence           |
+| POST      | /v1/admin/proxy/test           | Admin-only proxy availability and request-time test            |
 | GET/PATCH | /v1/admin/settings              | Read/set defaultProfileId                                      |
 | GET/POST  | /v1/admin/asr-keys              | Sanitized list / derive named ASR key                          |
 | DELETE    | /v1/admin/asr-keys/{id}         | Permanently revoke key and cancel its sessions                 |
@@ -75,6 +76,8 @@ Types: text / secret / boolean / number / select. Supported metadata: default, r
 ## Defaults and sessions
 
 ### Upstream proxy
+
+The contract advertises `proxyTestPath`. `POST /v1/admin/proxy/test` accepts `{proxy?: {url?, username?, password?}, target?: "https://example.com/"}`. Omitted proxy settings use the saved configuration; supplied fields use the same validation/credential-retention rules as saving but never persist. The HTTPS target must have no URL credentials or fragment. The service performs a GET through the proxy, verifies certificates, does not follow redirects, and times out after 10 seconds. Responses contain `ok`, `latencyMs`, an HTTP `status` when received, and a sanitized `error` on failure. HTTP 200–399 is considered available. No ASR credentials or audio are sent and no ASR quota is charged.
 
 Every provider's configuration includes boolean `useProxy` (default `false`), also exposed by the descriptive form contract. Admin settings/profile listings include `proxy: {url, hasCredentials}`; client listings omit global proxy settings. Credentials are never returned.
 

@@ -1,12 +1,56 @@
 """Explicit per-profile routing, independent of environment proxy variables."""
 
 import asyncio
+import time
+from urllib.parse import urlsplit
 
 import aiohttp
 from websockets.exceptions import InvalidStatusCode
 from websockets.legacy.client import connect as direct_connect
 
 from ..domain.asr_protocol import ProviderError
+
+
+async def test_proxy(proxy, target):
+    """Measure an HTTPS request through CONNECT, without persisting draft settings."""
+    try:
+        url = urlsplit(target)
+        valid = (
+            isinstance(target, str) and len(target) <= 2048 and url.scheme == "https"
+            and url.hostname and url.port != 0 and not url.username and not url.password
+            and not url.fragment and not any(c.isspace() or ord(c) < 32 for c in target)
+        )
+    except (ValueError, TypeError, AttributeError):
+        valid = False
+    if not valid:
+        raise ValueError("测试目标须为不含凭据的 HTTPS 地址")
+    if not proxy.get("url"):
+        raise ValueError("请先填写代理地址")
+    started = time.monotonic()
+    result = {"ok": False}
+    auth = (
+        aiohttp.BasicAuth(proxy["username"], proxy.get("password", ""), encoding="utf-8")
+        if proxy.get("username") else None
+    )
+    try:
+        async with aiohttp.ClientSession(
+            trust_env=False, timeout=aiohttp.ClientTimeout(total=10)
+        ) as session:
+            async with session.get(
+                target, proxy=proxy["url"], proxy_auth=auth, allow_redirects=False
+            ) as response:
+                result["ok"] = 200 <= response.status < 400
+                result["status"] = response.status
+                if not result["ok"]:
+                    result["error"] = "测试目标返回 HTTP %d" % response.status
+    except asyncio.TimeoutError:
+        result["error"] = "代理测试超时"
+    except aiohttp.ClientHttpProxyError:
+        result["error"] = "代理连接或认证失败，请检查 Proxy 设置"
+    except (aiohttp.ClientError, OSError):
+        result["error"] = "代理连接失败，请检查 Proxy 地址、证书和网络"
+    result["latencyMs"] = round((time.monotonic() - started) * 1000)
+    return result
 
 
 class ProxySocket:

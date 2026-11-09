@@ -24,6 +24,7 @@ from ..domain.dictionaries import FORMATS, parse_dictionary
 from ..domain.events import EventStream
 from ..domain.management import contract
 from ..providers.legacy import PROVIDERS, test_connection
+from ..providers.transport import test_proxy
 from ..storage.auth import AuthError
 from ..storage.hotwords import HotwordConflict
 from ..storage.key_vault import VaultError
@@ -669,6 +670,17 @@ class Portal:
         self.store.usage.configure_defaults(body)
         return web.json_response(self.store.settings(admin=True))
 
+    async def test_proxy(self, request):
+        self.authenticate(request, admin=True)
+        body = await request_object(request)
+        if body.keys() - {"proxy", "target"}:
+            raise ValueError("代理设置字段无效")
+        if "proxy" in body and not isinstance(body["proxy"], dict):
+            raise ValueError("代理设置字段无效")
+        return web.json_response(await test_proxy(
+            self.store.proxy.runtime(body.get("proxy")), body.get("target", "https://example.com/")
+        ))
+
     async def ui_ticket(self, request):
         self.authenticate(request, admin=True)
         ticket = secrets.token_urlsafe(32)
@@ -1149,6 +1161,7 @@ class Portal:
         app.router.add_post("/v1/admin/profiles", self.admin_profiles)
         app.router.add_get("/v1/admin/settings", self.admin_settings)
         app.router.add_patch("/v1/admin/settings", self.admin_settings)
+        app.router.add_post("/v1/admin/proxy/test", self.test_proxy)
         app.router.add_get("/v1/admin/asr-keys", self.admin_asr_keys)
         app.router.add_get("/v1/admin/usage", self.usage)
         app.router.add_post("/v1/admin/asr-keys", self.admin_asr_keys)

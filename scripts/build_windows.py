@@ -19,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 windows_replacement = runpy.run_path(str(ROOT / "scripts/windows_replacement.py"))
+wheel_cache = runpy.run_path(str(ROOT / "scripts/wheel_cache.py"))
 CACHE = ROOT / ".cache/windows"
 BUILD = ROOT / ".cache/build/windows"
 VERSION = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(), re.M)[1]
@@ -573,19 +574,29 @@ def prepare_runtime(payload):
     # jieba is pure Python but upstream publishes only an sdist. Build its universal
     # wheel locally; all native dependencies must have actual Windows cp313 wheels.
     pure = [requirement for requirement in requirements if requirement.startswith("jieba==")]
-    subprocess.run(
-        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(CACHE), *pure],
-        check=True,
-    )
     wheels = list(CACHE.glob("jieba-0.42.1-*-none-any.whl"))
+    if not wheels:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(CACHE), *pure],
+            check=True,
+        )
+        wheels = list(CACHE.glob("jieba-0.42.1-*-none-any.whl"))
     if len(wheels) != 1:
         raise RuntimeError("Expected one universal jieba wheel")
+    wheel_directory = wheel_cache["wheelhouse"](
+        CACHE / "wheels",
+        [requirement for requirement in requirements if requirement not in pure] + [str(wheels[0])],
+        "3.13",
+    )
     subprocess.run(
         [
             sys.executable,
             "-m",
             "pip",
             "install",
+            "--no-index",
+            "--find-links",
+            str(wheel_directory),
             "--target",
             str(payload / "python/Lib/site-packages"),
             "--platform",
@@ -596,8 +607,7 @@ def prepare_runtime(payload):
             "--no-compile",
             "--ignore-installed",
             "--no-warn-conflicts",
-            *[requirement for requirement in requirements if requirement not in pure],
-            str(wheels[0]),
+            *map(str, sorted(wheel_directory.glob("*.whl"))),
         ],
         check=True,
     )

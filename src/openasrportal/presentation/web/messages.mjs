@@ -3,26 +3,60 @@ import { errorMessages } from './error-messages.mjs';
 
 // Only authored interface text is translated. Placeholders preserve user data.
 export const messages = {
+  刷新页面: 'Reload page',
+  '测试目标（HTTPS）': 'Test target (HTTPS)',
+  '测试当前填写的代理设置，不会保存；延迟为经代理访问目标的完整请求耗时。':
+    'Test the current proxy settings without saving. Latency measures the full request to the target through the proxy.',
+  测试代理: 'Test proxy',
+  尚未测试: 'Not tested',
+  '测试中…': 'Testing…',
+  '配置已更改，请重新测试': 'Settings changed; test again',
+  '通过 Proxy': 'Via Proxy',
+  直接连接: 'Direct connection',
+  代理可用: 'Proxy available',
+  代理不可用: 'Proxy unavailable',
+  '请求总耗时 {0} ms': 'Total request time {0} ms',
+  '测试目标返回 HTTP {0}': 'Test target returned HTTP {0}',
+  '测试目标须为不含凭据的 HTTPS 地址': 'Enter an HTTPS test target without credentials.',
+  请先填写代理地址: 'Enter a proxy address first.',
+  代理测试超时: 'Proxy test timed out.',
+  '英文、中文': 'English, Chinese',
+  '自动识别（含英文、中文）': 'Automatic (including English and Chinese)',
+  英文: 'English',
+  中文: 'Chinese',
+  '默认 en,zh（英文、中文）；auto 自动识别，或用逗号分隔两位语言代码。':
+    'Default: en,zh (English, Chinese). Use auto for automatic detection, or comma-separated two-letter language codes.',
+  'Soniox 语种须为 auto 或逗号分隔的两位小写语言代码':
+    'Soniox language must be auto or comma-separated lowercase two-letter language codes.',
   'Proxy 代理': 'Proxy',
   '使用全局 Proxy 代理': 'Use global Proxy',
-  '使用代理选项必须为布尔值': 'Use proxy must be a boolean.',
-  '代理设置字段无效': 'Invalid proxy settings fields.',
-  '代理地址须为不含凭据的 http:// 或 https://主机:端口': 'Enter an HTTP/HTTPS proxy host and port without credentials in the URL.',
-  '请同时填写代理用户名和密码，或同时留空清除认证': 'Supply both proxy username and password, or leave both empty to remove authentication.',
-  '代理上游连接已中断，请检查网络后重试': 'The proxied upstream disconnected. Check the network and retry.',
-  '此上游已启用代理，请先在 Proxy 设置中配置代理地址': 'This upstream requires a proxy. Configure an address in Proxy settings first.',
-  '代理连接或认证失败，请检查 Proxy 设置': 'Proxy connection or authentication failed. Check Proxy settings.',
-  '代理连接失败，请检查 Proxy 地址、证书和网络': 'Proxy connection failed. Check the address, certificate and network.',
-  '配置 Portal 访问上游的 HTTP/HTTPS 代理，并在每个上游档案中勾选使用代理。': 'Configure an HTTP/HTTPS proxy for Portal, then enable it in each upstream profile.',
-  '连接测试和新识别连接使用此设置；代理失败不会回退直连。地址留空可移除代理。': 'Connection tests and new recognition connections use these settings. Proxy failures never fall back to direct access. Leave the address empty to remove the proxy.',
-  '代理地址': 'Proxy address',
-  '更新代理认证': 'Update proxy authentication',
-  '代理用户名': 'Proxy username',
-  '代理密码': 'Proxy password',
-  '勾选后同时留空可清除认证；修改代理地址时会清除旧认证。凭据不会回显。': 'Select and leave both fields empty to clear authentication. Changing the address clears old authentication. Saved credentials are never displayed.',
-  '保存代理设置': 'Save proxy settings',
-  '已保存代理认证': 'Proxy authentication saved',
-  '未配置代理认证': 'No proxy authentication configured',
+  使用代理选项必须为布尔值: 'Use proxy must be a boolean.',
+  代理设置字段无效: 'Invalid proxy settings fields.',
+  '代理地址须为不含凭据的 http:// 或 https://主机:端口':
+    'Enter an HTTP/HTTPS proxy host and port without credentials in the URL.',
+  '请同时填写代理用户名和密码，或同时留空清除认证':
+    'Supply both proxy username and password, or leave both empty to remove authentication.',
+  '代理上游连接已中断，请检查网络后重试':
+    'The proxied upstream disconnected. Check the network and retry.',
+  '此上游已启用代理，请先在 Proxy 设置中配置代理地址':
+    'This upstream requires a proxy. Configure an address in Proxy settings first.',
+  '代理连接或认证失败，请检查 Proxy 设置':
+    'Proxy connection or authentication failed. Check Proxy settings.',
+  '代理连接失败，请检查 Proxy 地址、证书和网络':
+    'Proxy connection failed. Check the address, certificate and network.',
+  '配置 Portal 访问上游的 HTTP/HTTPS 代理，并在每个上游档案中勾选使用代理。':
+    'Configure an HTTP/HTTPS proxy for Portal, then enable it in each upstream profile.',
+  '连接测试和新识别连接使用此设置；代理失败不会回退直连。地址留空可移除代理。':
+    'Connection tests and new recognition connections use these settings. Proxy failures never fall back to direct access. Leave the address empty to remove the proxy.',
+  代理地址: 'Proxy address',
+  更新代理认证: 'Update proxy authentication',
+  代理用户名: 'Proxy username',
+  代理密码: 'Proxy password',
+  '勾选后同时留空可清除认证；修改代理地址时会清除旧认证。凭据不会回显。':
+    'Select and leave both fields empty to clear authentication. Changing the address clears old authentication. Saved credentials are never displayed.',
+  保存代理设置: 'Save proxy settings',
+  已保存代理认证: 'Proxy authentication saved',
+  未配置代理认证: 'No proxy authentication configured',
   '代理设置已保存，新连接生效。': 'Proxy settings saved; they apply to new connections.',
   ...errorMessages,
   ...dynamicMessages,

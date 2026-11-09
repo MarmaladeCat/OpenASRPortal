@@ -1,6 +1,6 @@
 // 纯浏览器管理页：只调用 Management v1，提供商表单来自协议描述。
 import { PersonalHotwords, wordIdentity } from './personal-hotwords.mjs';
-import { userOption, userText } from './i18n.mjs';
+import { cloneLocalized, userOption, userText } from './i18n.mjs';
 
 const byId = (id) => document.getElementById(id);
 let credential = sessionStorage.getItem('openasrportal-admin-session') || '',
@@ -14,7 +14,9 @@ let proxyDirty = false;
 function showProxy(value) {
   if (proxyDirty) return;
   byId('proxy-url').value = value?.url || '';
-  byId('proxy-auth-status').textContent = value?.hasCredentials ? '已保存代理认证' : '未配置代理认证';
+  byId('proxy-auth-status').textContent = value?.hasCredentials
+    ? '已保存代理认证'
+    : '未配置代理认证';
   byId('proxy-update-auth').checked = false;
   for (const id of ['proxy-username', 'proxy-password']) {
     byId(id).value = '';
@@ -288,6 +290,7 @@ function concealKeys() {
   });
 }
 function showPage(page, focus = true) {
+  sessionStorage.setItem('openasrportal-page', page);
   if (page !== 'downstream') concealKeys();
   document.querySelectorAll('#admin-nav [role=tab]').forEach((tab) => {
     const active = tab.dataset.page === page;
@@ -994,16 +997,144 @@ byId('key-dictionary-online').onclick = () => {
   }
   loadKeyRecommendations(sourceId);
 };
+const profileResults = new Map();
+function panelStatus(element, message, state = '') {
+  element.textContent = message;
+  element.dataset.state = state;
+}
+async function probeProfile(value, output, button) {
+  const remember = !!button.closest('.upstream-profile');
+  if (remember) profileResults.delete(value.id);
+  const inputs = [...button.closest('form').querySelectorAll('input, select, button')];
+  const disabled = inputs.map((input) => input.disabled);
+  inputs.forEach((input) => {
+    input.disabled = true;
+  });
+  button.disabled = true;
+  panelStatus(output, '测试中…', 'pending');
+  try {
+    const result = await request(
+      `/v1/admin/profiles/${encodeURIComponent(value.id || 'draft')}/test`,
+      'POST',
+      value
+    );
+    const route = value.configuration.useProxy ? '通过 Proxy' : '直接连接';
+    const message = result.ok
+      ? `${route} · 测试通过 · 请求总耗时 ${result.latencyMs} ms`
+      : `${route} · ${result.error}`;
+    panelStatus(output, message, result.ok ? 'success' : 'error');
+    if (remember) profileResults.set(value.id, { message, state: output.dataset.state });
+  } catch (error) {
+    panelStatus(output, error.message, 'error');
+  } finally {
+    inputs.forEach((input, index) => {
+      input.disabled = disabled[index];
+    });
+  }
+}
+function inlineProfile(profile, card) {
+  const form = cloneLocalized(byId('form'));
+  const controls = {};
+  form.querySelectorAll('[id]').forEach((element) => {
+    controls[element.id] = element;
+    element.removeAttribute('id');
+  });
+  form.removeAttribute('id');
+  form.className = 'profile-form';
+  const entries = new Map();
+  controls['profile-id'].value = profile.id;
+  controls['profile-title'].value = profile.title;
+  controls.provider.value = profile.provider;
+  controls.fields.className = 'profile-fields';
+  renderFields(profile.configuration, controls.fields, entries, profile.provider);
+  const output = document.createElement('p');
+  output.className = 'probe-result';
+  output.setAttribute('role', 'status');
+  const previous = profileResults.get(profile.id);
+  panelStatus(output, previous?.message || '尚未测试', previous?.state || '');
+  const save = form.querySelector('[type=submit]');
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.className = 'profile-edit';
+  editButton.textContent = '修改';
+  save.before(editButton);
+  const lock = (locked) => {
+    card.classList.toggle('editing', !locked);
+    controls['profile-id'].readOnly = true;
+    controls['profile-title'].readOnly = locked;
+    controls.provider.disabled = locked;
+    for (const { input, definition } of entries.values()) {
+      if (input.tagName === 'SELECT' || input.type === 'checkbox') input.disabled = locked;
+      else input.readOnly = locked || !!definition.readOnly;
+    }
+    save.hidden = controls.cancel.hidden = locked;
+    editButton.hidden = !locked;
+  };
+  editButton.onclick = () => {
+    lock(false);
+    controls['profile-title'].focus();
+  };
+  controls.cancel.onclick = () => {
+    profileResults.delete(profile.id);
+    card.classList.remove('editing');
+    render();
+  };
+  controls.provider.onchange = () => {
+    renderFields({}, controls.fields, entries, controls.provider.value);
+    lock(false);
+    panelStatus(output, '配置已更改，请重新测试');
+  };
+  form.oninput = () => {
+    profileResults.delete(profile.id);
+    panelStatus(output, '配置已更改，请重新测试');
+  };
+  const value = () =>
+    profileBody(entries, controls['profile-id'], controls['profile-title'], controls.provider);
+  controls.test.onclick = async () => {
+    if (!form.reportValidity()) return;
+    card.classList.add('testing');
+    try {
+      await probeProfile(value(), output, controls.test);
+    } finally {
+      card.classList.remove('testing');
+    }
+  };
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    save.disabled = true;
+    try {
+      await request(`/v1/admin/profiles/${encodeURIComponent(profile.id)}`, 'PATCH', value());
+      card.classList.remove('editing');
+      await refresh();
+    } catch (error) {
+      panelStatus(output, error.message, 'error');
+    } finally {
+      save.disabled = false;
+    }
+  };
+  lock(true);
+  card.append(form, output);
+}
 function render() {
   const list = byId('profiles');
+  const drafts = new Map(
+    [...list.querySelectorAll(':scope > .editing, :scope > .testing')].map((card) => [
+      card.dataset.id,
+      card
+    ])
+  );
   list.replaceChildren();
   if (!profiles.length) {
     list.textContent = '还没有 ASR 配置。点击“增加配置”后，桌面应用即可选择使用。';
     return;
   }
   for (const [position, profile] of profiles.entries()) {
+    if (drafts.has(profile.id)) {
+      list.append(drafts.get(profile.id));
+      continue;
+    }
     const card = document.createElement('article');
-    card.className = 'profile';
+    card.className = 'profile upstream-profile';
     card.dataset.id = profile.id;
     const title = document.createElement('h3');
     title.append(userText(profile.title));
@@ -1013,9 +1144,6 @@ function render() {
         userText(profile.title),
         ` · ${profile.quota.enabled ? '启用' : profile.quota.disabledReason === 'manual' ? '手动停用' : '额度 / 计量停用'}`
       );
-    const detail = document.createElement('p');
-    detail.textContent = `${profile.id} · ${profile.provider} · ${profile.configuration.endpoint || ''}`;
-    detail.translate = false;
     const actions = document.createElement('div');
     actions.className = 'actions';
     const button = (label, callback, className) => {
@@ -1039,42 +1167,56 @@ function render() {
       makeDefault.disabled = profile.quota?.enabled === false;
     }
     if (profile.quota) {
-      button(profile.quota.enabled ? '停用' : '启用', async () => {
-        const result = await request(
-          `/v1/admin/profiles/${encodeURIComponent(profile.id)}/quota`,
-          'PATCH',
-          { enabled: !profile.quota.enabled }
-        );
-        await refresh();
-        status(
-          result.enabled
-            ? '上游已启用。'
-            : result.exhausted || result.tokenBlocked
-              ? '额度已用尽或无法计量，请先调整该上游的剩余配额。'
-              : '上游已停用，默认配置已按顺序调整。'
-        );
-      });
+      const toggleLabel = document.createElement('label');
+      toggleLabel.className = 'switch-label';
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.setAttribute('role', 'switch');
+      toggle.setAttribute('aria-label', '启用');
+      toggle.checked = profile.quota.enabled;
+      toggleLabel.append(toggle, '启用');
+      actions.append(toggleLabel);
+      toggle.onchange = async () => {
+        toggle.disabled = true;
+        try {
+          const result = await request(
+            `/v1/admin/profiles/${encodeURIComponent(profile.id)}/quota`,
+            'PATCH',
+            { enabled: toggle.checked }
+          );
+          await refresh();
+          panelStatus(
+            [...list.children]
+              .find((item) => item.dataset.id === profile.id)
+              .querySelector('.probe-result'),
+            result.enabled
+              ? '上游已启用。'
+              : result.exhausted || result.tokenBlocked
+                ? '额度已用尽或无法计量，请先调整该上游的剩余配额。'
+                : '上游已停用，默认配置已按顺序调整。'
+          );
+        } catch (error) {
+          toggle.checked = profile.quota.enabled;
+          panelStatus(card.querySelector('.probe-result'), error.message, 'error');
+        } finally {
+          toggle.disabled = false;
+        }
+      };
       for (const [label, offset] of [
         ['上移', -1],
         ['下移', 1]
       ]) {
         const move = button(label, async () => {
           const order = profiles.map((value) => value.id);
-          [order[position], order[position + offset]] = [order[position + offset], order[position]];
+          const index = order.indexOf(profile.id);
+          if (index < 0 || index + offset < 0 || index + offset >= order.length) return;
+          [order[index], order[index + offset]] = [order[index + offset], order[index]];
           await request(descriptor.settingsPath, 'PATCH', { profileOrder: order });
           await refresh();
         });
         move.disabled = position + offset < 0 || position + offset >= profiles.length;
       }
     }
-    button('修改', () => edit(profile));
-    button('测试', async () => {
-      const result = await request(
-        `/v1/admin/profiles/${encodeURIComponent(profile.id)}/test`,
-        'POST'
-      );
-      status(result.ok ? `测试通过 · 请求总耗时 ${result.latencyMs} ms` : result.error, !result.ok);
-    });
     button(
       '删除',
       async () => {
@@ -1084,7 +1226,8 @@ function render() {
       },
       'danger'
     );
-    card.append(title, detail, actions);
+    card.append(title, actions);
+    inlineProfile(profile, card);
     const quota = quotaControls(
       'profile',
       profile.id,
@@ -1105,12 +1248,18 @@ function edit(profile) {
   byId('profile-title').value = profile?.title || '';
   byId('provider').value = profile?.provider || descriptor.providers[0].id;
   renderFields(profile?.configuration || {});
+  panelStatus(byId('editor-result'), '尚未测试');
   byId('editor').scrollIntoView({ behavior: 'smooth' });
 }
-function renderFields(configuration) {
-  fields.clear();
-  byId('fields').replaceChildren();
-  const provider = descriptor.providers.find((value) => value.id === byId('provider').value);
+function renderFields(
+  configuration,
+  container = byId('fields'),
+  entries = fields,
+  providerId = byId('provider').value
+) {
+  entries.clear();
+  container.replaceChildren();
+  const provider = descriptor.providers.find((value) => value.id === providerId);
   for (const definition of provider.fields) {
     const label = document.createElement('label');
     label.textContent = definition.label;
@@ -1122,8 +1271,16 @@ function renderFields(configuration) {
       input.type =
         { secret: 'password', boolean: 'checkbox', number: 'number' }[definition.type] || 'text';
     const value = configuration[definition.key] ?? definition.default ?? '';
-    if (definition.type === 'boolean') input.checked = !!value;
-    else input.value = definition.type === 'secret' ? '' : String(value);
+    if (
+      definition.type === 'select' &&
+      !definition.options.some((option) => option.value === value)
+    )
+      input.append(userOption(String(value), String(value)));
+    if (definition.type === 'boolean') {
+      input.checked = !!value;
+      input.setAttribute('role', 'switch');
+      label.className = 'switch-label';
+    } else input.value = definition.type === 'secret' ? '' : String(value);
     input.required =
       !!definition.required && !(definition.type === 'secret' && configuration.hasApiKey);
     if (definition.type === 'secret') {
@@ -1143,13 +1300,16 @@ function renderFields(configuration) {
       help.textContent = definition.description;
       label.append(help);
     }
-    byId('fields').append(label);
-    fields.set(definition.key, { input, definition });
+    container.append(label);
+    entries.set(definition.key, { input, definition });
   }
 }
 function body() {
+  return profileBody(fields, byId('profile-id'), byId('profile-title'), byId('provider'));
+}
+function profileBody(entries, identity, title, provider) {
   const configuration = {};
-  for (const [key, { input, definition }] of fields) {
+  for (const [key, { input, definition }] of entries) {
     if (definition.type === 'secret' && !input.value.trim()) continue;
     configuration[key] =
       definition.type === 'boolean'
@@ -1159,9 +1319,9 @@ function body() {
           : input.value.trim();
   }
   return {
-    id: byId('profile-id').value.trim(),
-    title: byId('profile-title').value.trim(),
-    provider: byId('provider').value,
+    id: identity.value.trim(),
+    title: title.value.trim(),
+    provider: provider.value,
     configuration
   };
 }
@@ -1180,7 +1340,7 @@ byId('connect').onclick = action(async () => {
 byId('admin-key').onkeydown = (event) => {
   if (event.key === 'Enter') byId('connect').click();
 };
-byId('refresh').onclick = action(refresh);
+byId('refresh').onclick = () => location.reload();
 byId('new').onclick = () => edit(null);
 byId('cancel').onclick = () => {
   byId('editor').hidden = true;
@@ -1188,17 +1348,11 @@ byId('cancel').onclick = () => {
   byId('fields').replaceChildren();
 };
 byId('provider').onchange = () => renderFields({});
-byId('test').onclick = action(async () => {
+byId('test').onclick = async () => {
   // A new draft must supply its own key, even if its ID matches a saved profile.
   for (const { input } of fields.values()) if (!input.reportValidity()) return;
-  const value = body();
-  const result = await request(
-    `/v1/admin/profiles/${encodeURIComponent(value.id || 'draft')}/test`,
-    'POST',
-    value
-  );
-  status(result.ok ? `测试通过 · 请求总耗时 ${result.latencyMs} ms` : result.error, !result.ok);
-});
+  await probeProfile(body(), byId('editor-result'), byId('test'));
+};
 byId('form').onsubmit = (event) => {
   event.preventDefault();
   action(async () => {
@@ -1214,7 +1368,49 @@ byId('form').onsubmit = (event) => {
     await refresh();
   })();
 };
-byId('proxy-form').oninput = () => { proxyDirty = true; };
+byId('proxy-form').oninput = () => {
+  proxyDirty = true;
+  panelStatus(byId('proxy-result'), '配置已更改，请重新测试');
+};
+function proxyBody() {
+  const proxy = { url: byId('proxy-url').value.trim() };
+  if (byId('proxy-update-auth').checked) {
+    proxy.username = byId('proxy-username').value;
+    proxy.password = byId('proxy-password').value;
+  }
+  return proxy;
+}
+byId('proxy-test').onclick = async () => {
+  if (!byId('proxy-form').reportValidity()) return;
+  const button = byId('proxy-test'),
+    output = byId('proxy-result');
+  button.disabled = true;
+  byId('proxy-save').disabled = true;
+  const inputs = [...byId('proxy-form').querySelectorAll('input')];
+  const disabled = inputs.map((input) => input.disabled);
+  const value = { proxy: proxyBody(), target: byId('proxy-target').value.trim() };
+  inputs.forEach((input) => {
+    input.disabled = true;
+  });
+  panelStatus(output, '测试中…', 'pending');
+  try {
+    const result = await request(descriptor.proxyTestPath, 'POST', value);
+    panelStatus(
+      output,
+      result.ok
+        ? `代理可用 · 请求总耗时 ${result.latencyMs} ms`
+        : `代理不可用 · 请求总耗时 ${result.latencyMs} ms · ${result.error}`,
+      result.ok ? 'success' : 'error'
+    );
+  } catch (error) {
+    panelStatus(output, error.message, 'error');
+  } finally {
+    button.disabled = byId('proxy-save').disabled = false;
+    inputs.forEach((input, index) => {
+      input.disabled = disabled[index];
+    });
+  }
+};
 byId('proxy-update-auth').onchange = () => {
   for (const id of ['proxy-username', 'proxy-password']) {
     byId(id).disabled = !byId('proxy-update-auth').checked;
@@ -1224,11 +1420,7 @@ byId('proxy-update-auth').onchange = () => {
 byId('proxy-form').onsubmit = (event) => {
   event.preventDefault();
   action(async () => {
-    const proxy = { url: byId('proxy-url').value.trim() };
-    if (byId('proxy-update-auth').checked) {
-      proxy.username = byId('proxy-username').value;
-      proxy.password = byId('proxy-password').value;
-    }
+    const proxy = proxyBody();
     byId('proxy-save').disabled = true;
     try {
       const value = await request(descriptor.settingsPath, 'PATCH', { proxy });
@@ -1306,6 +1498,8 @@ tabs.forEach((tab, index) => {
   };
 });
 const ticket = new URLSearchParams(location.hash.slice(1)).get('ticket');
+const previousPage = sessionStorage.getItem('openasrportal-page');
+if (tabs.some((tab) => tab.dataset.page === previousPage)) showPage(previousPage, false);
 if (ticket) {
   history.replaceState(null, '', location.pathname);
   action(async () => {

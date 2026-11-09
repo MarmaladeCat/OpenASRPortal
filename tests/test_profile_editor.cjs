@@ -62,14 +62,36 @@ async function run() {
     document.getElementById('proxy-username').value='fictional-user';
     document.getElementById('proxy-password').value='fictional-proxy-password';`);
   await require('./language_ui.cjs').language(window, 'en');
-  assert.equal(await js('document.getElementById("proxy-password").value'), 'fictional-proxy-password');
-  assert.equal(await js('document.getElementById("proxy-save").textContent'), 'Save proxy settings');
+  assert.equal(
+    await js('document.getElementById("proxy-password").value'),
+    'fictional-proxy-password'
+  );
+  assert.equal(
+    await js('document.getElementById("proxy-save").textContent'),
+    'Save proxy settings'
+  );
   await js(`document.getElementById('proxy-form').requestSubmit();`);
   await wait('document.getElementById("proxy-password").value === ""');
   assert.equal(await js('document.getElementById("proxy-update-auth").checked'), false);
   await js(`document.getElementById('refresh').click();`);
-  await wait('document.getElementById("proxy-auth-status").textContent === "Proxy authentication saved"');
-  assert.equal(await js('document.getElementById("proxy-url").value'), 'https://proxy.example:8443');
+  await wait('!document.getElementById("workspace").hidden');
+  await wait(
+    'document.getElementById("proxy-auth-status").textContent === "Proxy authentication saved"'
+  );
+  assert.equal(
+    await js('document.getElementById("proxy-url").value'),
+    'https://proxy.example:8443'
+  );
+  await js(`document.getElementById('proxy-url').value='http://127.0.0.1:1';
+    document.getElementById('proxy-url').dispatchEvent(new Event('input', {bubbles:true}));
+    document.getElementById('proxy-test').click();`);
+  await wait('document.getElementById("proxy-result").dataset.state === "error"');
+  assert.ok(
+    await js('document.getElementById("proxy-result").textContent.includes("Proxy unavailable")')
+  );
+  await js(`document.getElementById('proxy-url').value='https://proxy.example:8443';
+    document.getElementById('proxy-url').dispatchEvent(new Event('input', {bubbles:true}));`);
+  assert.equal(await js('document.getElementById("proxy-result").dataset.state'), '');
   await require('./language_ui.cjs').language(window, 'zh-CN');
   // Observe actual requests, while still sending them to the real management API.
   await js(`window.profileWrites=[];window.profileProbes=[];
@@ -86,7 +108,8 @@ async function run() {
   ]) {
     await newDoubao();
     assert.equal(await js('document.querySelector("#fields [name=useProxy]").checked'), false);
-    if (id === 'doubao-1') await js('document.querySelector("#fields [name=useProxy]").checked = true');
+    if (id === 'doubao-1')
+      await js('document.querySelector("#fields [name=useProxy]").checked = true');
     assert.equal(await js(`${secret}.value`), '');
     assert.equal(await js(`${secret}.required`), true);
     assert.equal(await js(`${secret}.autocomplete`), 'new-password');
@@ -110,14 +133,47 @@ async function run() {
     'key-2'
   ]);
   const endpoints = await js('window.profileWrites.map(value=>value.configuration.endpoint)');
-  assert.deepEqual(await js('window.profileWrites.map(value=>value.configuration.useProxy)'), [true, false]);
+  assert.deepEqual(await js('window.profileWrites.map(value=>value.configuration.useProxy)'), [
+    true,
+    false
+  ]);
   assert.equal(endpoints[0], endpoints[1]);
+  const firstCard = 'document.querySelector(\'#profiles article[data-id="doubao-1"]\')';
+  await js(`${firstCard}.querySelector('.actions input[role=switch]').click();`);
+  await wait(`${firstCard}.querySelector('h3').textContent.includes('手动停用')`);
+  assert.equal(await js(`${firstCard}.querySelector('.actions input[role=switch]').checked`), false);
+  await js(`${firstCard}.querySelector('.actions input[role=switch]').click();`);
+  await wait(`${firstCard}.querySelector('h3').textContent.includes('启用')`);
+  assert.equal(await js(`${firstCard}.querySelector('[name=endpoint]').readOnly`), true);
+  assert.equal(await js(`${firstCard}.querySelector('[name=useProxy]').disabled`), true);
+  await js(`${firstCard}.querySelector('.profile-edit').click();
+    ${firstCard}.querySelector('[name=useProxy]').click();
+    [...${firstCard}.querySelectorAll('button')].find(button=>button.textContent==='测试上游连接').click();`);
+  await wait(`${firstCard}.querySelector('.probe-result').dataset.state === 'success'`);
+  assert.equal(await js('JSON.parse(window.profileProbes.at(-1)).configuration.useProxy'), false);
+  assert.ok(
+    await js(`${firstCard}.querySelector('.probe-result').textContent.includes('直接连接')`)
+  );
+  await js(
+    `[...${firstCard}.querySelectorAll('button')].find(button=>button.textContent==='取消').click();`
+  );
+  assert.equal(await js(`${firstCard}.querySelector('[name=useProxy]').checked`), true);
+  await js(
+    `[...${firstCard}.querySelectorAll('button')].find(button=>button.textContent==='测试上游连接').click();`
+  );
+  await wait(`${firstCard}.querySelector('.probe-result').dataset.state === 'success'`);
+  assert.equal(await js('JSON.parse(window.profileProbes.at(-1)).configuration.useProxy'), true);
+  assert.ok(
+    await js(`${firstCard}.querySelector('.probe-result').textContent.includes('通过 Proxy')`)
+  );
   await js(`Array.from(document.querySelectorAll('#profiles article[data-id="doubao-2"] button'))
     .find(button=>button.textContent==='修改').click();`);
-  assert.equal(await js(`${secret}.value`), '');
-  assert.equal(await js(`${secret}.required`), false);
-  await js(`document.getElementById('profile-title').value='删除';
-    document.getElementById('form').requestSubmit();`);
+  const editing = 'document.querySelector("#profiles .editing form")';
+  const inlineSecret = `${editing}.querySelector('[name=apiKey]')`;
+  assert.equal(await js(`${inlineSecret}.value`), '');
+  assert.equal(await js(`${inlineSecret}.required`), false);
+  await js(`${editing}.querySelector('input[maxlength="200"]').value='删除';
+    ${editing}.requestSubmit();`);
   await wait(`document.querySelector('#profiles article[data-id="doubao-2"] h3')
     .textContent.includes('删除')`);
   await require('./language_ui.cjs').language(window, 'en');
@@ -140,47 +196,91 @@ async function run() {
     document.getElementById('provider').dispatchEvent(new Event('change'));`);
   assert.equal(await js(`${secret}.value`), '');
   assert.equal(await js(`${secret}.required`), true);
-  assert.equal(await js('document.querySelector("#fields input[name=model]").value'), 'qwen-audio-3.1-asr-flash-streaming');
-  assert.equal(await js('document.querySelector("#fields [name=previewIntervalMs]") === null'), true);
-  assert.ok((await js('document.querySelector("#fields input[name=endpoint]").value')).startsWith('wss://'));
+  assert.equal(
+    await js('document.querySelector("#fields input[name=model]").value'),
+    'qwen-audio-3.1-asr-flash-streaming'
+  );
+  assert.equal(
+    await js('document.querySelector("#fields [name=previewIntervalMs]") === null'),
+    true
+  );
+  assert.ok(
+    (await js('document.querySelector("#fields input[name=endpoint]").value')).startsWith('wss://')
+  );
   await js(`document.getElementById('provider').value='boson_realtime';
     document.getElementById('provider').dispatchEvent(new Event('change'));`);
   assert.equal(await js(`${secret}.value`), '');
-  assert.equal(await js('document.querySelector("#fields input[name=model]").value'), 'higgs-stt-3.1');
+  assert.equal(
+    await js('document.querySelector("#fields input[name=model]").value'),
+    'higgs-stt-3.1'
+  );
   assert.equal(await js('document.querySelector("#fields input[name=endpoint]").readOnly'), true);
   await js(`document.getElementById('profile-id').value='boson-1';
     document.getElementById('profile-title').value='Boson 测试';
     ${secret}.value='fictional-boson-key';
-    document.querySelector('#fields input[name=language]').value='zh';`);
+    document.querySelector('#fields [name=language]').value='zh';`);
   await require('./language_ui.cjs').language(window, 'en');
-  assert.equal(await js('document.querySelector("#fields input[name=language]").value'), 'zh');
-  assert.ok(await js('document.getElementById("fields").textContent.includes("without word-by-word previews")'));
+  assert.equal(await js('document.querySelector("#fields [name=language]").value'), 'zh');
+  assert.ok(
+    await js(
+      'document.getElementById("fields").textContent.includes("without word-by-word previews")'
+    )
+  );
   await js(`document.getElementById('form').requestSubmit();`);
   await wait(`document.querySelector('#profiles article[data-id="boson-1"]') !== null`);
   assert.equal(await js('window.profileWrites.at(-1).provider'), 'boson_realtime');
   await js(`Array.from(document.querySelectorAll('#profiles article[data-id="boson-1"] button'))
     .find(button=>button.textContent==='Edit').click();`);
-  assert.equal(await js(`${secret}.value`), '');
-  assert.equal(await js(`${secret}.required`), false);
-  await js(`document.getElementById('form').requestSubmit();`);
-  await wait('document.getElementById("editor").hidden');
+  assert.equal(await js(`${inlineSecret}.value`), '');
+  assert.equal(await js(`${inlineSecret}.required`), false);
+  await js(`${editing}.requestSubmit();`);
+  await wait('document.querySelector("#profiles .editing") === null');
   assert.equal(await js('window.profileWrites.at(-1).configuration.apiKey'), undefined);
   await js(`document.getElementById('new').click();
     document.getElementById('provider').value='soniox_realtime';
     document.getElementById('provider').dispatchEvent(new Event('change'));`);
   assert.equal(await js('document.querySelector("#fields input[name=model]").value'), 'stt-rt-v6');
+  assert.equal(await js('document.querySelector("#fields [name=language]").value'), 'en,zh');
   assert.equal(await js(`${secret}.value`), '');
   await js(`document.getElementById('profile-id').value='soniox-1';
     document.getElementById('profile-title').value='Soniox 测试';
     ${secret}.value='fictional-soniox-key';
-    document.querySelector('#fields input[name=language]').value='zh';`);
+    document.querySelector('#fields [name=language]').value='zh';`);
   await require('./language_ui.cjs').language(window, 'zh-CN');
-  assert.equal(await js('document.querySelector("#fields input[name=language]").value'), 'zh');
+  assert.equal(await js('document.querySelector("#fields [name=language]").value'), 'zh');
   await require('./language_ui.cjs').language(window, 'en');
-  assert.ok(await js('document.getElementById("fields").textContent.includes("Maximum endpoint delay")'));
+  assert.ok(
+    await js('document.getElementById("fields").textContent.includes("Maximum endpoint delay")')
+  );
   await js(`document.getElementById('form').requestSubmit();`);
   await wait(`document.querySelector('#profiles article[data-id="soniox-1"]') !== null`);
   assert.equal(await js('window.profileWrites.at(-1).provider'), 'soniox_realtime');
+  await require('./language_ui.cjs').language(window, 'zh-CN');
+  window.setContentSize(1180, 900);
+  assert.ok(
+    await js(`${firstCard}.querySelector('.profile-form').textContent.includes('配置 ID')`)
+  );
+  assert.ok(
+    await js(`${firstCard}.querySelector('.profile-form').textContent.includes('测试上游连接')`)
+  );
+  await js(`document.getElementById('admin-body').scrollTop=0;`);
+  fs.writeFileSync(
+    path.join(root, 'test-results/upstream-panels-zh.png'),
+    (await window.webContents.capturePage()).toPNG()
+  );
+  await require('./language_ui.cjs').language(window, 'en');
+  fs.writeFileSync(
+    path.join(root, 'test-results/upstream-panels-en.png'),
+    (await window.webContents.capturePage()).toPNG()
+  );
+  window.setContentSize(390, 844);
+  assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true);
+  await js(`window.reloadMarker=true;document.getElementById('refresh').click();`);
+  await wait('!document.getElementById("workspace").hidden && window.reloadMarker === undefined');
+  assert.equal(
+    await js('document.getElementById("tab-upstream").getAttribute("aria-selected")'),
+    'true'
+  );
   console.log(
     'PASS Portal profile editor: same endpoint, independent keys, empty new keys, validation, edit/cancel/provider reset'
   );

@@ -1,16 +1,18 @@
-# OpenASRPortal 1.1.0 版本说明
+# OpenASRPortal 1.1.1 版本说明
 
 [English](release.md) | **简体中文**
 
 ## 上游代理
 
+上游面板支持就地只读/编辑、启用与代理开关及面板内测试结果；代理可用性与耗时测试；语言下拉框及页面刷新图标。新建 Soniox 档案默认英文、中文提示。
+
 全局 HTTP/HTTPS Proxy 设置支持加密保存可选认证，每个上游档案独立选择是否使用。连接测试和识别使用相同路由；代理失败不静默回退直连。
 
 [OpenASRInput](https://github.com/MarmaladeCat/OpenASRInput) 通过 Portal 提供系统语音输入，合体包计划放在 [Input Release 页](https://github.com/MarmaladeCat/OpenASRInput/releases)。每个安装包配同名 `文件名.sha256`，每份只含对应包的一行校验记录。
 
-1.1.0 安装包包含百炼/Soniox 流式识别、Boson AI Higgs STT、每上游独立代理选择、统一目录、保留配置重装、按需首次设置和中英文切换，详见 [安装说明](installation.zh-CN.md)。
+1.1.1 安装包包含百炼/Soniox 流式识别、Boson AI Higgs STT、每上游独立代理选择、统一目录、保留配置重装、按需首次设置和中英文切换，详见 [安装说明](installation.zh-CN.md)。
 
-产品与包工具版本均为 1.1.0；客户端与管理协议均保持 v1。全部文档提供英文默认入口及中文链接。本说明描述功能范围，具体平台验收随候选包单独记录。
+产品与包工具版本均为 1.1.1；客户端与管理协议均保持 v1。全部文档提供英文默认入口及中文链接。本说明描述功能范围，具体平台验收随候选包单独记录。
 
 ## 本版能力
 
@@ -27,7 +29,7 @@
 
 ## 下载与文档
 
-软件包使用 `OpenASRPortal_1.1.0_<系统>_<架构>.<后缀>`：Linux 服务为 `.deb`，Docker 部署为 `.tar.gz`，Windows 为 `.msi`；按 amd64/arm64 选择。独立安装不自动配置录音客户端。
+软件包使用 `OpenASRPortal_1.1.1_<系统>_<架构>.<后缀>`：Linux 服务为 `.deb`，Docker 部署为 `.tar.gz`，Windows 为 `.msi`；按 amd64/arm64 选择。独立安装不自动配置录音客户端。
 
 GitHub Release 附件只保留软件包及各自的 `.sha256`。在线阅读[使用手册](user-guide.zh-CN.md)、[客户端协议](API.zh-CN.md)和[管理协议](MANAGEMENT.zh-CN.md)。本地构建目录保留文档归档、manifest.json 和 SHA256SUMS。Docker 部署包包含镜像及部署材料，实际运行部署命令使用包内平铺布局。
 

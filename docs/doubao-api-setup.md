@@ -2,7 +2,7 @@
 
 **English** | [简体中文](doubao-api-setup.zh-CN.md)
 
-Create a Volcengine project, activate **Doubao streaming speech recognition 2.0**, and bind its API key to an upstream profile in OpenASRPortal **1.1.0**.
+Create a Volcengine project, activate **Doubao streaming speech recognition 2.0**, and bind its API key to an upstream profile in OpenASRPortal **1.1.1**.
 
 ## 1. Sign in to Volcengine
 
@@ -23,7 +23,7 @@ Use this project for both model activation and API key creation below.
 2. Find **Doubao streaming speech recognition model 2.0 (豆包流式语音识别模型 2.0)** and select **Activate (开通)**.
 3. Confirm the service agreement and complete activation. This guide uses the **duration edition**.
 
-New users generally receive **20 hours** of free usage. After that allowance is exhausted, the usage-based price is **CNY 1 per hour**. Eligibility, credit expiration, and actual pricing depend on the console; check the resources and billing pages.
+Check the selected project's available trial resources, expiration, balance, and current duration/concurrency pricing in the console. Trial allowances and prices can change; Portal does not provision cloud credit or synchronize its local quota with the cloud balance.
 
 ## 4. Create an API key
 
@@ -45,14 +45,22 @@ Use the **API key** from the new Doubao Speech console. If the page shows legacy
 | Display name | For example, “Doubao Speech 2.0” |
 | Provider | Doubao realtime speech recognition |
 | Upstream API key | The newly created API key; enter only the key |
-| WebSocket endpoint | Keep the read-only endpoint provided by Portal |
+| WebSocket endpoint | Keep `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async` (read-only) |
 | Model resource | 2.0 duration edition: `volc.seedasr.sauc.duration` |
 | Second-pass recognition | Keep enabled by default |
+| Use proxy | Off for direct access; enable only after configuring Portal's global HTTP/HTTPS proxy |
 
-3. Select **Test upstream connection (测试上游连接)**, then **Save connection configuration (保存接入配置)** after success.
+3. For an existing card, select **Edit** first; otherwise fill the new-connection form. Choose **Use proxy** before **Test upstream connection**. The test uses the current form values and proxy choice, with its result inside that panel. It does not save the form. Select **Save** after success; **Cancel** discards edits.
 4. To use Doubao by default, select **Set as default (设为默认)** on its upstream card.
 
 The Doubao API key is now bound to Portal's upstream. Select this profile in a client and record a short phrase to check recognition. For client connection settings, see the [Portal user guide](user-guide.md).
+
+## Recognition and network settings
+
+- Match the resource to the service you activated: 2.0 duration is `volc.seedasr.sauc.duration`, 2.0 concurrency is `volc.seedasr.sauc.concurrent`. The `volc.bigasr.sauc.*` choices are the older 1.0 resources. A valid key alone does not grant every resource.
+- Second-pass recognition revises a completed segment after streaming previews. Keep it enabled initially. This Portal adapter does not expose a language-list field for Doubao; do not paste `en,zh` into the model/resource field. The interface language dropdown changes the page language, not the recognizer.
+- To use a proxy, save its address and optional authentication under **Settings → HTTP/HTTPS proxy**, test availability there, then enable **Use proxy** on this upstream. The proxy must support CONNECT to the WSS endpoint. An enabled but unavailable proxy fails explicitly; disabling the switch selects direct routing. The proxy address must be reachable from the Portal service, not just your browser.
+- Keep the card **Enabled** after saving. The connection test can consume upstream usage and establishes connectivity/model access, not microphone quality. Verify with a short Chinese phrase and a short English phrase from an actual client.
 
 ## Troubleshooting
 

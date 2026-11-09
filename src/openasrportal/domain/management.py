@@ -9,6 +9,9 @@ def field(key, label, kind="text", **attributes):
 
 def contract():
     secret = field("apiKey", "上游 API Key", "secret", required=True, retainWhenOmitted=True)
+    languages = [{"value": value, "label": {
+        "auto": "自动识别（含英文、中文）", "en": "英文", "zh": "中文",
+    }.get(value, value)} for value in BAILIAN_LANGUAGES]
     definitions = [
         (
             "openlocalasr",
@@ -52,10 +55,7 @@ def contract():
                     "language",
                     "识别语种",
                     "select",
-                    options=[
-                        {"value": value, "label": "自动" if value == "auto" else value}
-                        for value in BAILIAN_LANGUAGES
-                    ],
+                    options=languages,
                 ),
                 field("silenceMs", "断句静音（毫秒）", "number", min=200, max=6000, step=100),
                 field("keepDialect", "保留方言表达", "boolean"),
@@ -68,8 +68,9 @@ def contract():
                 field("endpoint", "官方 WebSocket 地址", readOnly=True),
                 field("model", "模型", readOnly=True),
                 secret,
-                field("language", "识别语种", required=True,
-                      description="auto 自动识别，或 zh / en 等两位语言代码。"),
+                field("language", "识别语种", "select", required=True,
+                      options=[{"value": "en,zh", "label": "英文、中文"}, *languages],
+                      description="默认 en,zh（英文、中文）；auto 自动识别，或用逗号分隔两位语言代码。"),
                 field("endpointDelayMs", "最大端点延迟（毫秒）", "number", min=500, max=3000, step=100),
             ],
         ),
@@ -81,7 +82,7 @@ def contract():
                 field("model", "模型", readOnly=True),
                 secret,
                 field(
-                    "language", "识别语种", required=True,
+                    "language", "识别语种", "select", required=True, options=languages,
                     description="auto 自动识别，或 zh / en 等两位语言代码；停顿后返回分段文本，无逐字预览。",
                 ),
                 field("silenceMs", "断句静音（毫秒）", "number", min=600, max=3000, step=100),
@@ -115,6 +116,7 @@ def contract():
         "providers": providers,
         "profilesPath": "/v1/admin/profiles",
         "settingsPath": "/v1/admin/settings",
+        "proxyTestPath": "/v1/admin/proxy/test",
         "asrKeysPath": "/v1/admin/asr-keys",
         "usagePath": "/v1/admin/usage",
         "keyQuotaPath": "/v1/admin/asr-keys/{id}/quota",

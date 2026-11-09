@@ -1,10 +1,12 @@
-# OpenASRPortal 1.1.0 release notes
+# OpenASRPortal 1.1.1 release notes
 
 **English** | [简体中文](release.zh-CN.md)
 
-Product/package versions are 1.1.0; client and management protocols remain v1. Docs are English-first with Chinese counterparts. Platform acceptance is recorded per candidate, separately from these capability notes.
+Product/package versions are 1.1.1; client and management protocols remain v1. Docs are English-first with Chinese counterparts. Platform acceptance is recorded per candidate, separately from these capability notes.
 
 ## Capabilities
+
+- Upstream panels with inline read-only/edit modes, enable/proxy switches and local test results; proxy availability/latency testing; language dropdowns and page reload icon. New Soniox profiles prefer English and Chinese hints.
 
 - Global HTTP/HTTPS proxy settings with encrypted optional authentication and per-upstream opt-in, shared by probes and recognition; no silent direct fallback.
 
@@ -23,9 +25,9 @@ Product/package versions are 1.1.0; client and management protocols remain v1. D
 
 [OpenASRInput](https://github.com/MarmaladeCat/OpenASRInput) provides system-wide voice input through Portal. Combined packages are intended for the [Input release page](https://github.com/MarmaladeCat/OpenASRInput/releases). Each installer has its own `filename.sha256`, with exactly one checksum record.
 
-The 1.1.0 packages include Bailian/Soniox streaming, Boson AI Higgs STT, per-upstream proxy selection, unified directories, retained-data reinstallation, setup-on-demand, and Chinese/English switching. See [installation.md](installation.md).
+The 1.1.1 packages include Bailian/Soniox streaming, Boson AI Higgs STT, per-upstream proxy selection, unified directories, retained-data reinstallation, setup-on-demand, and Chinese/English switching. See [installation.md](installation.md).
 
-Packages use `OpenASRPortal_1.1.0_<os>_<architecture>.<extension>`: Linux `.deb` for the service or `.tar.gz` for Docker deployment, and Windows `.msi`. Choose amd64/arm64 appropriately. Standalone installation does not configure recording clients.
+Packages use `OpenASRPortal_1.1.1_<os>_<architecture>.<extension>`: Linux `.deb` for the service or `.tar.gz` for Docker deployment, and Windows `.msi`. Choose amd64/arm64 appropriately. Standalone installation does not configure recording clients.
 
 GitHub Release attachments contain only packages and their individual `.sha256` files. Read the [user guide](user-guide.md), [client API](API.md), and [management API](MANAGEMENT.md) online. Local build directories retain documentation archives, manifest.json, and SHA256SUMS. Docker deployment packages contain the image and deployment materials; execute deployment commands from their flat layout.
 

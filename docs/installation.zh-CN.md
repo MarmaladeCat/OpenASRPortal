@@ -2,7 +2,7 @@
 
 [English](installation.md) | **简体中文**
 
-本页行为适用于 Portal 1.1.0 及 Input 1.1.0 + Portal 1.1.0 合体安装包。
+本页行为适用于 Portal 1.1.1 及 Input 1.1.1 + Portal 1.1.1 合体安装包。
 
 ## 配合 Input 安装
 

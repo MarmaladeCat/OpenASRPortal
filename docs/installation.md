@@ -2,7 +2,7 @@
 
 **English** | [简体中文](installation.zh-CN.md)
 
-These behaviors apply to Portal 1.1.0 and the combined Input 1.1.0 + Portal 1.1.0 installers.
+These behaviors apply to Portal 1.1.1 and the combined Input 1.1.1 + Portal 1.1.1 installers.
 
 ## Install with Input
 

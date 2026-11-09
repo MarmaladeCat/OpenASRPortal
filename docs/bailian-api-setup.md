@@ -2,7 +2,7 @@
 
 **English** | [简体中文](bailian-api-setup.zh-CN.md)
 
-Create an Alibaba Cloud Model Studio (Bailian) workspace, authorize **`qwen-audio-3.1-asr-flash-streaming`**, and create an API key bound to that workspace for an upstream profile in OpenASRPortal **1.1.0**.
+Create an Alibaba Cloud Model Studio (Bailian) workspace, authorize **`qwen-audio-3.1-asr-flash-streaming`**, and create an API key bound to that workspace for an upstream profile in OpenASRPortal **1.1.1**.
 
 ## 1. Sign in to Model Studio
 
@@ -47,7 +47,10 @@ The key must **belong to the workspace whose model access you authorized**. If y
 | Upstream API key | The key bound to the new workspace; enter only the key |
 | WebSocket endpoint | This workspace's DashScope WSS endpoint, as described below |
 | Model | Keep the read-only `qwen-audio-3.1-asr-flash-streaming` |
-| Other recognition options | Keep the defaults initially |
+| Recognition language | `auto` for automatic recognition including Chinese and English; select a single supported language only when needed |
+| Preserve dialect | Off initially; enable only if you want the provider's dialect-preservation behavior |
+| Segmentation silence | 800 ms initially; supported range 200–6000 ms |
+| Use proxy | Off for direct access; enable only with a configured global HTTP/HTTPS proxy |
 
 Obtain the **Workspace ID** from this workspace's connection information in Model Studio. For Beijing, enter:
 
@@ -63,10 +66,18 @@ For Singapore, use a workspace and key in that region and enter:
 wss://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/inference
 ```
 
-3. Select **Test upstream connection (测试上游连接)**, then **Save connection configuration (保存接入配置)** after success.
+3. Existing cards start read-only: choose **Edit** before changing fields. Set **Use proxy**, then **Test upstream connection**. The test uses the unsaved form and current proxy choice; its result stays in the panel. Select **Save** to persist the connection, or **Cancel** to discard edits.
 4. To use Bailian by default, select **Set as default (设为默认)** on its upstream card.
 
 The Bailian API key is now bound to Portal's upstream. Select this profile in a client and record a short phrase to check recognition. For client connection settings, see the [Portal user guide](user-guide.md).
+
+## Language, proxy, and first-use checks
+
+`auto` is the starting point for Chinese/English or mixed-language speech. Bailian accepts one language selection here, not Soniox's comma-separated `en,zh` list. The page-language dropdown is independent. The selected model must actually be available to your region and workspace; access to a similarly named HTTP or Realtime model does not replace permission for the exact streaming model above.
+
+For proxy routing, first save and test **Settings → HTTP/HTTPS proxy**, then enable **Use proxy** on the Bailian card. A proxy availability test is an HTTPS request, not a Bailian model test; run both checks. Proxy failures never fall back to direct access. For Docker/remote services, addresses are resolved from Portal's environment; its `127.0.0.1` is not the browser machine.
+
+Save the profile, leave **Enabled** on, and set it as default or choose it explicitly in the client. Clients connect to Portal's HTTP(S) address with a Portal-issued ASR key. Test short Chinese and English utterances, watching for previews before Stop and a final result after Stop. An upstream connection test may consume a small amount of usage and does not validate real speech accuracy.
 
 ## Billing and troubleshooting
 

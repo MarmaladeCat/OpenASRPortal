@@ -29,6 +29,7 @@ class TokenTests(unittest.TestCase):
         return [(e["type"], e["nbest"][0]["sentence"]) for e in events]
 
     def test_config_secret_retention_and_validation(self):
+        self.assertEqual(self.provider.parameters()['language_hints'], ['en', 'zh'])
         config = validate_config(SONIOX_MODEL, {"language": "zh"}, self.provider.config)
         self.assertEqual(config["apiKey"], "fictional")
         for change in ({"endpoint": "wss://example.org"}, {"model": "stt-async-v4"},

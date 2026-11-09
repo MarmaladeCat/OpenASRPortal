@@ -33,7 +33,7 @@ class SonioxProvider:
                   "enable_endpoint_detection": True,
                   "max_endpoint_delay_ms": self.config["endpointDelayMs"]}
         if self.config["language"] != "auto":
-            result["language_hints"] = [self.config["language"]]
+            result["language_hints"] = list(dict.fromkeys(self.config["language"].split(',')))
         if self.config.get("hotwords"):
             result["context"] = {"terms": [term["text"] for term in self.config["hotwords"]]}
         return result

@@ -29,6 +29,8 @@ Add UI for web changes; adapter changes cover revisions, metering, end/cancel, a
 
 ## Pinned builds
 
+Preserve `.cache/build/portable/<arch>/` and the toolchain images between builds. Frozen-runtime reuse verifies code/assets, recipe/version, immutable image ID, Python/CPU and every payload hash/mode; documentation-only changes still repackage with fresh source provenance. A changed input or damaged cache triggers refreezing. Windows retains a hash-checked resolved wheelhouse in `.cache/windows/wheels/`, keyed by requirements and target Python/architecture, and installs offline with `--no-index`. Keep Python/WinSW downloads and the universal jieba wheel; delete a wheelhouse explicitly only when refreshing dependencies. Temporary package staging is disposable; database/model directories are not build caches.
+
 Public package filenames are `OpenASRPortal_<version>_<os>_<architecture>.<extension>`, including Docker `.tar.gz` packages. GitHub Release attachments contain only packages and their exact `.sha256` companions; authored notes and documentation links go in the release body. Local release directories retain documentation and provenance records.
 
 ```bash
@@ -40,7 +42,7 @@ python scripts/build.py --deployment windows --arch amd64 --wix-bin <WiX-directo
 
 debs use Ubuntu 22.04 / SHA256-pinned Python 3.12.10 / PyInstaller 6.16.0; images use Python 3.12.10 / Debian 12. The private DEB interpreter enables HTTPS proxy TLS-in-TLS while retaining the Ubuntu 22.04 libc baseline. Source installations need Python 3.11+ for HTTPS proxies. MSI orchestration uses native Windows Python 3.12.10 and WiX 3.14.1; bundled private Python is 3.13.16, service wrapper WinSW 2.12.0. packaging/ recipes call build_portable_deb.py, build_image.py, or build_windows.py without workspace source dependencies.
 
-Candidates: `.cache/build/artifacts/<os>/<arch>/<variant>/`. Publish to `release/1.1.0/`; VERSION/package metadata are 1.1.0. Flat output contains debs, image bundles, MSI, bilingual docs ZIP/READMEs, manifest.json, SHA256SUMS. Docker bundles contain real image.tar and authored deployment instructions, never dist/ output.
+Candidates: `.cache/build/artifacts/<os>/<arch>/<variant>/`. Publish to `release/1.1.1/`; VERSION/package metadata are 1.1.1. Flat output contains debs, image bundles, MSI, bilingual docs ZIP/READMEs, manifest.json, SHA256SUMS. Docker bundles contain real image.tar and authored deployment instructions, never dist/ output.
 
 Publication verifies provenance, unique candidates, version, architecture, and hashes before replacement; matching-source other-platform artifacts merge. Building is not service installation/upgrade/uninstallation or real-recognition acceptance. Store records in test-results/.
 
