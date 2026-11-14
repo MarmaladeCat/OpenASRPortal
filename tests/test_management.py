@@ -47,7 +47,8 @@ class ManagementTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             {provider["id"] for provider in descriptor["providers"]},
-            {"openlocalasr", "doubao_realtime", "bailian_qwen_asr", "boson_realtime", "soniox_realtime"},
+            {"openlocalasr", "openlocalasr_file", "doubao_realtime", "bailian_qwen_asr",
+             "boson_realtime", "soniox_realtime", "openai_file", "openai_realtime"},
         )
         body = {
             "id": "local",

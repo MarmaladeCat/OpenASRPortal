@@ -96,7 +96,11 @@ def capability(provider):
     if provider == "soniox_realtime":
         return {"supported": True, "mode": "context-terms", "maxEntries": 2000,
                 "budgetUnit": "utf8-bytes-conservative", "budget": 7000,
-                "note": "Soniox 上下文词不传权重；Portal 保守限制为 7000 UTF-8 字节"}
+                 "note": "Soniox 上下文词不传权重；Portal 保守限制为 7000 UTF-8 字节"}
+    if provider in {"openai_file", "openai_realtime"}:
+        return {"supported": True, "mode": "keywords", "maxEntries": 100,
+                "budgetUnit": "utf8-bytes-conservative", "budget": 4096,
+                "note": "OpenAI 关键词不传权重；Portal 限制 100 个词及 4096 UTF-8 字节"}
     return {"supported": False, "mode": "none", "note": "当前本地模型接口不支持会话级热词增强"}
 
 
@@ -120,9 +124,11 @@ def select_terms(provider, terms, settings):
                 reason = "token-budget"
             else:
                 budget += cost
-        elif provider == "soniox_realtime":
+        elif provider in {"soniox_realtime", "openai_file", "openai_realtime"}:
             cost = len(text.encode("utf-8")) + 4
-            if budget + cost > 7000:
+            if any(c in text for c in "<>\r\n"):
+                reason = "term-format"
+            elif budget + cost > limits["budget"]:
                 reason = "token-budget"
             else:
                 budget += cost

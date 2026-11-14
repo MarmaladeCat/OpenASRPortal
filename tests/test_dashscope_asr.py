@@ -54,8 +54,8 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             try:
                 await provider.open()
                 await provider.send_audio(bytes(6400))
-                self.assertEqual((await provider.receive())[0][0]["type"], "partial_result")
-                self.assertEqual((await provider.receive())[0][0]["nbest"][0]["sentence"], "正确。")
+                self.assertFalse((await provider.receive())[0][0].stable)
+                self.assertEqual((await provider.receive())[0][0].text, "正确。")
                 self.assertEqual(await provider.receive(), ([], False))
                 await provider.send_audio(b"", last=True)
                 self.assertEqual(await provider.receive(), ([], True))

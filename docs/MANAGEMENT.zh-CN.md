@@ -7,7 +7,7 @@ HTTP JSON，管理请求携带 `Authorization: Bearer <管理会话令牌>`，�
 首次设置和登录见下文；密码/Key 由数据库管理，不使用凭据环境变量。
 所有配置读取都脱敏，上游 Key 仅保留在 Portal。
 
-提供商 `boson_realtime` 暴露 `apiKey`、固定 `endpoint`（`wss://api.boson.ai/v1/realtime`）、固定 `model`（`higgs-stt-3.1`）、`language`（`auto` 或两位小写语言代码）和整数 `silenceMs`（600–3000，默认 800）。支持时长额度，不支持 Token 额度和会话热词。见[开通配置](boson-api-setup.zh-CN.md)。
+提供商 `boson_realtime` 暴露 `apiKey`、固定 `endpoint`（`wss://api.boson.ai/v1/realtime`）、固定 `model`（`higgs-stt-3.1`）和 `language`（`auto` 或两位小写语言代码）。旧 `silenceMs` 移除，完整音频在录音结束时提交。支持时长额度，不支持 Token 额度和会话热词。见[开通配置](boson-api-setup.zh-CN.md)。
 
 ## 接口
 
@@ -205,19 +205,27 @@ AI、计算机、编程入门表只在初始化时写入，保留 tech-ai/tech-c
 
 ## 用量与额度
 
+`openai_file`、`openai_realtime` 是独立档案类型，使用固定官方端点。文件选择 JSON 或 SSE，Realtime 选择录音中预览或 commit 后转写，两者均可填写背景提示和语种。见 [OpenAI 设置](openai-api-setup.zh-CN.md)。`openlocalasr_file` 为独立的 60 秒完整录音档案。管理／客户端档案公布 `capabilities.recognition` 和 `capabilities.limits`，卡片展示预览时机、稳定粒度、录音上限，定义见[识别契约](recognition-contract.zh-CN.md)。
+
 PATCH `/v1/admin/asr-keys/{id}/quota` 或 `/v1/admin/profiles/{id}/quota` 接受 `{"remainingSeconds":900,"remainingTokens":null}`；上游可增加 enabled。值是新的余额，不是增量；null 不限额，0 用尽，省略保持原值，不清零累计。时长与 Token 任一耗尽即可阻止后续调用。
 
 管理查询 quota 含 remainingSeconds、remainingTokens、reservedSeconds、availableSeconds、usedSeconds、reportedTokens、tokens、requests、tokenReports、unreportedRequests、enabled、disabledReason、tokenBlocked、exhausted、priority。没有 Token 报告时 tokens 为 null，不是 0。
 
-`GET /v1/admin/usage` 参数：from/to（Unix 秒或 ISO 8601），bucket=hour/day/month，keyId，profileId，timezone（IANA，如 Asia/Shanghai）。默认最近七天、UTC；返回 total/timeline/keys/profiles/trackingStartedAt/resolutionSeconds。普通客户端 `/v1/profiles` 仅见可用状态，不见余额和累计。
+`GET /v1/admin/usage` 参数：from/to（Unix 秒或 ISO 8601），bucket=hour/day/month，keyId，profileId，timezone（IANA，如 Asia/Shanghai）。默认最近七天、UTC；返回 total/timeline/keys/profiles/trackingStartedAt/resolutionSeconds 及 `providerUsage`。普通客户端 `/v1/profiles` 仅见可用状态，不见余额和累计。
 
-时长按提交 PCM 的 32000 字节/秒计量，不按连接等待计时。按完整样本原子扣减，余额边界截取并正常收尾；未连接和过期票据不扣音频，失败/取消保留已用量。上游音频只计一次。Soniox 云端按含空闲的流时长计费，与本地音频配额不同。旧预留列仅保留用于数据库兼容和重启恢复。
+`providerUsage` 是按 `tokens`、`duration`（秒）、`unknown`（`total:null`）分组的 `{kind,scopes,total}` 列表。按会话创建时间筛选返回的 from/to 区间，应用相同 keyId/profileId 过滤，汇总各会话 request 或 item 作用域的最新累计报告。它不按时间桶拆分，与按分钟压缩的本地音频历史独立。unknown 可更新为已知，重复／过期总量不重复计费。UI 展示上游报告时长和未知作用域数量；duration 不换算为 Token，缺报告也不是零费用。
 
-`bailian_qwen_asr` 使用 `qwen-audio-3.1-asr-flash-streaming`、官方 WSS `/api-ws/v1/inference`、`language`、`keepDialect` 和服务端 `silenceMs`（200–6000，默认 800），已移除预览间隔。旧 HTTP 设置读取/保存时迁移，保留凭据和配额。`soniox_realtime` 暴露 Key、固定端点/模型（`stt-rt-v6`）、`language`（`auto` 或两位提示代码）及 `endpointDelayMs`（500–3000，默认 2000）。见[百炼](bailian-api-setup.zh-CN.md)和 [Soniox](soniox-api-setup.zh-CN.md)。
+本地时长按已接受源 PCM 的 32000 字节/秒计量，不按连接等待或重采样输出计时。按完整样本原子扣减，余额边界截取并正常收尾；未连接和过期票据不扣音频，失败／取消保留已接受用量，上游音频只计一次。文件档案在实际提交时开始计请求：零样本结束、end 前取消不产生请求，也不因缺报告阻断 Token 配额。刚好耗尽时长余额的录音仍可提交已接受音频一次。Soniox 云端按含空闲的流时长计费，与本地配额不同。旧预留列仅用于数据库兼容和重启恢复。
+
+`bailian_qwen_asr` 使用 `qwen-audio-3.1-asr-flash-streaming`、官方 WSS `/api-ws/v1/inference`、`language`、`keepDialect` 和服务端 `silenceMs`（200–6000，新默认 6000，已有保存值保留），已移除预览间隔。旧 HTTP 设置读取/保存时迁移，保留凭据和配额。`soniox_realtime` 暴露 Key、固定端点/模型（`stt-rt-v6`）、`language`、`endpointDetection`（布尔，缺省 false）及 `endpointDelayMs`（500–3000，默认 2000，仅开启端点检测时发送）。见[百炼](bailian-api-setup.zh-CN.md)和 [Soniox](soniox-api-setup.zh-CN.md)。
+
+豆包新档案 `enableNonstream` 默认 false；`silenceMs` 接受 300–5000 整数、默认 5000，仅开启二遍识别时作为 `end_window_size` 发送。已有开关及合法值保留；旧配置的 200–299 / 5001–6000 读取时迁移为 300 / 5000，下次保存时持久化，新提交的越界值校验失败。百炼独立的 200–6000 范围不变。见[豆包配置](doubao-api-setup.zh-CN.md)。
 
 管理测试只计上游，未保存草稿用 `draft:提供商:id` 区分。音频历史按分钟压缩，查询向外覆盖完整分钟，余额扣减仍按样本。Portal 不是厂商账单/云余额查询。
 
 Token 采用上游 usage 的 total_tokens 或 input_tokens/output_tokens、prompt_tokens/completion_tokens，不凭文字长度估计。百炼上报任务累计量：只扣增量，重复或过期总量不重复计费，每任务计一次请求/报告。无报告显示未上报，中断任务保留已知部分总量。豆包、LocalASR、Boson 和 Soniox 不提供计费 Token 报告，设置 Token 限额时拒绝选用。百炼最终用量缺失时设置 tokenBlocked，停止后续调用，即使此前已收到部分用量。
+
+OpenAI 用量作用域为文件请求或 Realtime item/content。已知 Token 各作用域只累计一次；混入 duration／unknown 时保留已知扣费，但不能成功结算 Token 限额调用。已发请求的最终必需 Token 缺失（含中断）设置 `tokenBlocked`。清除本地限额不改变厂商计费。
 
 Token 在任务完成后结算，最终可能超出余额，真实用量全额入账、余额归零；Token 限额范围内流式任务串行准入，直到正常、错误或取消后的清理。管理员降低余额不能撤销已执行工作。可清除 Token 限额改用时长，或确认上游恢复上报后重新设置预算解除暂停。
 

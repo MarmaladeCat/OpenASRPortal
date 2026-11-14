@@ -31,6 +31,14 @@ python scripts/test.py run --suite ui
 
 ## 必须覆盖的行为
 
+崩溃恢复从全新数据根和纯回环文件上游开始，在提交文件前及等待响应时强制终止真实服务进程，以本轮新建的数据重启，检查认证/档案/用量保留、旧票据失效、没有自动重放音频，并完成一次新请求。客户端 TCP 突然断开须释放文件缓存预算，未提交的请求不计费。这些检查覆盖 SIGKILL / TerminateProcess，不代表实体断电或存储持久性验收。全新安装的新旧数据位置均为空，保留数据夹具在本轮内创建。
+
+类型化结果测试覆盖 A-preview/B-final/A-final 交错、身份／修订重复、不同音频位置相同文字、冲突定稿、未决空单位、整段预览撤回。会话测试独立阻塞真实 write／commit／HTTP body drain 与识别完成，覆盖取消／超时竞争、ready 前音频、源样本额度及清理。
+
+文件和 OpenAI 夹具覆盖 end 后整轮仅一次 PCM/WAV 请求、缓存准入、零音频、提交前取消、额度结束后提交、JSON/SSE 全文替换及截断、UTF-8／行分片、Realtime commit 前 delta、前驱顺序及 request/item 用量去重。NumPy／SoXR 验证不同分包、显式 PCM16 取整和单次尾部 flush。UI 验证两种 OpenAI 表单、短上限、时机标签和 duration／unknown 用量的双语展示。合成检查之外，真实云验证需要公开语音、临时凭据、实际事件时序／用量及各平台包内转换组件。
+
+边界回归覆盖豆包 300–5000 ms 配置/迁移及非 definite 终包、Soniox 在端点和结束时撤回临时后缀或全部临时文本、Boson 合法大帧与真正阻塞时的有界队列，以及独立的录音/收尾截止时间。验证显式结束、额度自动结束、超过原录音截止点后的收尾取消和唯一终态。配置 UI 验证各提供商范围及中英文切换时保留草稿。
+
 Boson 适配测试使用模拟 WebSocket 覆盖手动轮次初始化、定稿顺序与去重、空音频、错误与断连、有界积压、等待转写时取消、公开 v1 定稿、时长额度和探测计量。配置 UI 测试覆盖 Boson 字段、中英文切换和密钥保留。真实云端验收使用仓库外的临时 Boson Key，回放公开的 16 kHz PCM 讲话音频，包含两个有停顿的语段；音频哈希、事件耗时/finalCount 和用量保存在 test-results/。静音探测、真实识别、麦克风输入及安装包验收分别记录。
 
 | 层次               | 必测内容                                                                                               |
@@ -46,7 +54,11 @@ Boson 适配测试使用模拟 WebSocket 覆盖手动轮次初始化、定稿顺
 python tests/check_container.py --image openasrportal:test
 ```
 
+在隔离网络命名空间或 VM 内运行 `python tests/check_packaged_asr.py --runtime <解包运行时> --results test-results/<新轮次>`；Windows 传入解包后的私有 `python.exe` 并添加 `--python-runtime`。检查独占回环代理端口 7890，仅让子进程信任一次性夹具证书，经公开 API 验证包内 SoXR 转换／flush 与文件 JSON/SSE。上游为模拟服务，不需要真实凭据或互联网，不能代替安装器验收。
+
 ## 结果规则
+
+百炼 wire 夹具必须使用从 1 起算的正常句号和句号 0 的心跳，覆盖交错分句、稳定累计 Token 报告后的空终止 payload、最后报告缺失及已有部分用量后中断。真实 Token 限额验收须逐项核对扣款与捕获的供应商报告。
 
 - 测试失败返回非零；环境、依赖或真实设备不足记录为阻塞，不能改为 passed。
 - unittest 的 skipped 计入报告，状态为 incomplete；默认返回非零。日常 `--allow-skips` 可允许退出成功，但报告仍不完整，不能作为平台发布验收。

@@ -6,7 +6,6 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from aiohttp import ClientSession
 from aiohttp.test_utils import TestServer
@@ -16,7 +15,7 @@ from websockets.legacy.server import serve
 
 from openasrportal.domain.asr_protocol import ProviderError
 from openasrportal.domain.config import BOSON_MODEL, validate_config
-from openasrportal.providers.boson_asr import BosonProvider
+from openasrportal.providers.boson_asr import MAX_QUEUED_BYTES, BosonProvider
 from openasrportal.providers.legacy import test_connection as probe_connection
 from openasrportal.storage.store import Store
 
@@ -29,7 +28,7 @@ class ConfigTests(unittest.TestCase):
         config = validate_config(BOSON_MODEL, {"apiKey": "fictional-boson-key"})
         for changes in (
             {"endpoint": "wss://example.org/v1/realtime"}, {"model": "gpt-realtime"},
-            {"language": "zh-CN"}, {"language": []}, {"silenceMs": True}, {"silenceMs": 100},
+            {"language": "zh-CN"}, {"language": []},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 validate_config(BOSON_MODEL, changes, config)
@@ -109,35 +108,36 @@ class BosonTests(unittest.IsolatedAsyncioTestCase):
     async def result(self):
         return await asyncio.wait_for(self.provider.receive(), 2)
 
-    async def test_streams_before_commit_and_preserves_two_finals_in_order(self):
-        await self.provider.send_audio(VOICE)
-        await self.provider.send_audio(bytes(25600))
-        first, last = await self.result()
-        self.assertFalse(last)
-        self.assertEqual(first[0]["nbest"][0]["sentence"], "分段1。")
+    async def test_pauses_quiet_speech_and_leading_silence_are_uploaded_without_commits(self):
+        audio = bytes(6400) + b"\x01\x00" * 3200 + VOICE + bytes(96000)
+        await self.provider.send_audio(audio)
+        await self.provider.audio.join()
+        # A websocket round-trip proves all earlier appends reached the upstream.
+        await (await self.provider.socket.ping())
+        self.assertEqual(b"".join(self.audio), audio)
+        self.assertEqual(self.commits, 0)
         await self.provider.send_audio(VOICE + b"\x00\x10", last=True)
-        second, last = await self.result()
+        final, last = await self.result()
         self.assertTrue(last)
-        self.assertEqual(second[0]["nbest"][0]["sentence"], "分段2。")
-        self.assertEqual(b"".join(self.audio), VOICE + bytes(25600) + VOICE + b"\x00\x10")
-        self.assertEqual(self.commits, 2)
+        self.assertEqual(final[0].text, "分段1。")
+        self.assertEqual(b"".join(self.audio), audio + VOICE + b"\x00\x10")
+        self.assertEqual(self.commits, 1)
         self.assertFalse(any(m["type"] == "response.create" for m in self.messages))
 
-    async def test_backpressure_does_not_supersede_pending_transcription(self):
+    async def test_audio_after_end_cannot_supersede_pending_transcription(self):
         self.reply_gate.clear()
-        await self.provider.send_audio(VOICE + bytes(25600))
+        await self.provider.send_audio(VOICE + bytes(25600), last=True)
         await asyncio.wait_for(self.commit_seen.wait(), 2)
-        await asyncio.wait_for(self.provider.send_audio(VOICE, last=True), .1)
+        with self.assertRaises(ProviderError):
+            await self.provider.send_audio(VOICE)
         self.assertEqual(self.commits, 1)
         self.reply_gate.set()
-        first, _ = await self.result()
-        second, done = await self.result()
-        self.assertEqual([first[0]["nbest"][0]["sentence"], second[0]["nbest"][0]["sentence"]],
-                         ["分段1。", "分段2。"])
+        final, done = await self.result()
+        self.assertEqual(final[0].text, "分段1。")
         self.assertTrue(done)
 
-    async def test_empty_recording_and_silence_do_not_hallucinate(self):
-        await self.provider.send_audio(bytes(64000), last=True)
+    async def test_empty_recording_does_not_commit(self):
+        await self.provider.send_audio(b"", last=True)
         self.assertEqual(await self.result(), ([], True))
         self.assertEqual(self.commits, 0)
         self.assertEqual(self.audio, [])
@@ -156,17 +156,74 @@ class BosonTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_transcript_is_a_successful_empty_segment(self):
         self.mode = "empty"
         await self.provider.send_audio(VOICE, last=True)
-        self.assertEqual(await self.result(), ([], True))
-
-    async def test_forced_segment_boundary_preserves_continuous_audio(self):
-        with patch("openasrportal.providers.boson_asr.MAX_SEGMENT_BYTES", 6400):
-            await self.provider.send_audio(VOICE)
-            first, _ = await self.result()
-            await self.provider.send_audio(VOICE, last=True)
-            second, done = await self.result()
-        self.assertEqual(len(first) + len(second), 2)
+        events, done = await self.result()
         self.assertTrue(done)
-        self.assertEqual(b"".join(self.audio), VOICE * 2)
+        self.assertEqual([(event.text, event.stable) for event in events], [("", True)])
+
+    async def test_more_than_fifteen_seconds_is_one_turn_including_silence(self):
+        for _ in range(100):
+            await self.provider.send_audio(VOICE)
+            await self.provider.audio.join()
+        await self.provider.send_audio(bytes(6400), last=True)
+        final, done = await self.result()
+        self.assertEqual(len(final), 1)
+        self.assertEqual(self.commits, 1)
+        self.assertTrue(done)
+        self.assertEqual(b"".join(self.audio), VOICE * 100 + bytes(6400))
+
+    async def test_large_burst_yields_to_healthy_uploader_without_losing_samples(self):
+        audio = VOICE * 80 + b"\x01\x00"
+        await self.provider.send_audio(audio, last=True)
+        events, last = await self.result()
+        self.assertTrue(last)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(b"".join(self.audio), audio)
+        self.assertEqual(self.commits, 1)
+        self.assertEqual(self.provider.queued_bytes, 0)
+
+    async def test_genuinely_stalled_uploader_stays_bounded_and_can_be_cancelled(self):
+        entered = asyncio.Event()
+
+        async def blocked(*args, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+        self.provider._send = blocked
+        with self.assertRaisesRegex(ProviderError, "积压"):
+            await asyncio.wait_for(self.provider.send_audio(VOICE * 80), 1)
+        self.assertTrue(entered.is_set())
+        self.assertLessEqual(self.provider.queued_bytes, MAX_QUEUED_BYTES)
+        self.assertEqual(self.commits, 0)
+        await asyncio.wait_for(self.provider.close(), .5)
+        self.assertTrue(self.provider.uploader.done())
+        self.assertTrue(self.provider.worker.done())
+
+    async def test_public_large_frames_are_uploaded_as_one_manual_turn(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "test-results") as directory:
+            store = Store(directory)
+            store.save("boson", "Boson", BOSON_MODEL, {"apiKey": "fictional-key"})
+            portal = Portal(store, "client-key", "admin-key", factory=lambda _: BosonProvider(self.config))
+            async with TestServer(portal.app()) as server, ClientSession(
+                headers={"Authorization": "Bearer client-key"}
+            ) as client:
+                for size in (512000, 1048574):
+                    with self.subTest(size=size):
+                        self.audio.clear()
+                        before = self.commits
+                        async with client.post(server.make_url("/v1/sessions"), json={}) as response:
+                            descriptor = await response.json()
+                        socket = await client.ws_connect(server.make_url(
+                            descriptor["streamPath"] + "?ticket=" + descriptor["ticket"]))
+                        self.assertEqual((await socket.receive_json())["type"], "session.ready")
+                        audio = b"\x01\x10" * (size // 2)
+                        await socket.send_bytes(audio)
+                        await socket.send_json({"type": "audio.end"})
+                        self.assertEqual((await socket.receive_json(timeout=3))["type"], "transcript.final")
+                        done = await socket.receive_json(timeout=3)
+                        self.assertEqual((done["type"], done["finalCount"]), ("session.finished", 1))
+                        self.assertEqual(b"".join(self.audio), audio)
+                        self.assertEqual(self.commits, before + 1)
+                        await socket.close()
 
     async def test_error_redaction_and_mismatched_turn_rejection(self):
         self.mode = "error"
@@ -195,14 +252,10 @@ class BosonTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.provider.worker.done())
         self.assertEqual(self.commits, 0)
 
-    async def test_pending_transcription_can_be_cancelled_and_backlog_is_bounded(self):
+    async def test_pending_transcription_can_be_cancelled(self):
         self.reply_gate.clear()
-        await self.provider.send_audio(VOICE + bytes(25600))
+        await self.provider.send_audio(VOICE + bytes(25600), last=True)
         await asyncio.wait_for(self.commit_seen.wait(), 2)
-        for _ in range(60):
-            await self.provider.send_audio(VOICE)
-        with self.assertRaises(ProviderError):
-            await self.provider.send_audio(VOICE * 20)
         await asyncio.wait_for(self.provider.close(), 2)
         self.assertTrue(self.provider.uploader.done())
         self.assertTrue(self.provider.worker.done())
@@ -258,8 +311,8 @@ class BosonTests(unittest.IsolatedAsyncioTestCase):
                 self.commit_seen.clear()
                 self.reply_gate.clear()
                 await socket.send_bytes(VOICE + bytes(25600))
+                await socket.send_json({"type": "audio.end"})
                 await asyncio.wait_for(self.commit_seen.wait(), 2)
-                await socket.send_bytes(VOICE)
                 await socket.send_json({"type": "session.cancel"})
                 self.assertEqual((await socket.receive_json(timeout=2))["type"], "session.cancelled")
                 await socket.close()

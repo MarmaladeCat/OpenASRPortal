@@ -2,7 +2,7 @@
 
 [English](localasr-setup.md) | **简体中文**
 
-适用于 Portal 1.1.1 与 OpenLocalASR 0.14.0。LocalASR 在自己的机器运行模型，没有独立设置网页。安装及准备模型权重见 [LocalASR 使用手册](https://github.com/MarmaladeCat/OpenLocalASR/blob/main/docs/user-guide.zh-CN.md)。
+适用于 Portal 1.2.0 与 OpenLocalASR 0.14.0。LocalASR 在自己的机器运行模型，没有独立设置网页。安装及准备模型权重见 [LocalASR 使用手册](https://github.com/MarmaladeCat/OpenLocalASR/blob/main/docs/user-guide.zh-CN.md)。
 
 ## 准备识别服务
 
@@ -28,6 +28,8 @@
 点击 **测试上游连接**，测试使用当前表单/代理选择，结果显示在卡片内。成功不代表保存：点击 **保存**、保持 **启用**，再设为默认或从客户端选择。**取消**放弃修改。确需代理时先配置并测试全局 HTTP/HTTPS 代理，已开启但不可用时不会回退直连。
 
 ## 验证识别与排查
+
+需要明确的完整录音路径时，选择 **OpenLocalASR · 完整录音文件**（`openlocalasr_file`），地址为 `http://127.0.0.1:10095/api/v1/services/aigc/multimodal-generation/generation`，或实际远端 HTTPS 接口。沿用当前模型和服务 Key。Portal 内存缓存整轮，停止后仅提交一次 16 kHz WAV，无预览，每轮限 60 秒；客户端必须协商 `effectiveSessionLimits`。既有 `openlocalasr` WS 配置独立保留，预览时机取决于模型，不能从 WebSocket 推断。
 
 客户端填写 Portal 的 HTTP(S) 地址和 Portal 派生的 ASR Key。使用支持中英文的模型分别录制短句，停止后等待定稿。页面语言下拉框不是模型语言设置；此适配器没有语言列表字段，识别语种和预览能力取决于所选 LocalASR 模型。
 

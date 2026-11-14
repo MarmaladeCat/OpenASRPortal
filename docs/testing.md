@@ -22,6 +22,14 @@ setup creates Python tests in `.cache/functional/`, product desktop dependencies
 
 ## Required coverage
 
+Crash recovery starts with a new data root and loopback-only file upstream. Kill the real service process before file submission and while awaiting its response, restart with the same newly created data, and verify persisted authentication/profiles/usage, rejection of old tickets, no automatic audio replay, and one successful new request. Abrupt client TCP loss must release file-cache admission without charging an unsubmitted request. These checks exercise SIGKILL / TerminateProcess, not physical power failure or storage durability. Fresh installation uses empty current and legacy data locations; retention fixtures are created within the run.
+
+Typed-result tests cover interleaved A-preview/B-final/A-final, duplicate identities/revisions, identical text at different audio positions, conflicting stable text, unresolved empty units, and full preview withdrawal. Session tests block real write/commit/body drain independently of recognition completion, exercise cancel/timeout races and ready-before-audio, and check source-sample quotas and cleanup.
+
+File and OpenAI fixtures cover one complete PCM/WAV request after end, cache admission, zero audio, pre-submit cancellation, quota-end submission, JSON/SSE full-text replacement and truncated streams, UTF-8/line framing, pre-commit Realtime deltas, predecessor ordering, and request/item usage deduplication. NumPy/SoXR checks use different chunk boundaries, explicit PCM16 rounding and one final flush. UI covers both OpenAI forms, short limits, timing labels and duration/unknown usage in both languages. These are synthetic checks; real cloud tests require public speech, temporary credentials, actual event timings/usage and each target's packaged conversion libraries.
+
+Boundary regressions cover Doubao's 300–5000 ms configuration/migration and non-definite terminal packets, Soniox stable-prefix/all-provisional withdrawal at endpoints and completion, Boson legal large frames versus a genuinely stalled bounded queue, and separate recording/finalization deadlines. Verify explicit and quota-triggered end, cancellation after the recording deadline, and exactly one terminal event. Profile UI checks validate provider-specific ranges and retained drafts in both languages.
+
 Proxy checks use disposable HTTP and HTTPS CONNECT proxies and a locally trusted WSS echo/protocol server. Cover binary/text/empty-text frames, separate proxy/upstream authentication, explicit direct routing, no fallback, rejected authentication, timeout/cancellation cleanup, encrypted persistence, admin-only redaction, public probe/recognition routing, and bilingual profile/settings UI. These simulated endpoints verify transport, not cloud recognition. Re-run the transport tests in the packaged runtime as well as the development interpreter.
 
 Bailian and Soniox use simulated WebSocket wire tests for partials before audio end, stable/deduplicated finals, server errors, completion markers, raw PCM, and bounded state. Public v1 checks cover quota truncation, probes, cancellation/timeout, cumulative token accounting and limited-account serialization; migration keeps old keys/regions/quotas. UI checks cover streaming model fields, removal of preview intervals, Soniox settings and both languages. These tests do not establish cloud recognition or latency. Real acceptance needs provider credentials, public Chinese/English audio, pre-stop partials, end-to-final timing, and actual usage records under test-results/; installer/native acceptance remains platform-specific.
@@ -41,7 +49,11 @@ After building the matching candidate:
 python tests/check_container.py --image openasrportal:test
 ```
 
+In an isolated network namespace or VM, run `python tests/check_packaged_asr.py --runtime <extracted-runtime> --results test-results/<new-run>`. On Windows, pass the extracted private `python.exe` and add `--python-runtime`. The check owns loopback proxy port 7890, trusts a disposable fixture certificate only in the child, and exercises packaged SoXR conversion/flush plus file JSON/SSE through public APIs. Its upstream is simulated; it needs no real credential or Internet access and is separate from installer acceptance.
+
 ## Results
+
+Bailian wire fixtures must use normal sentence IDs starting at 1 and heartbeat ID 0. Cover interleaved sentences, an empty terminal payload after a stable cumulative token report, a missing last report, and interruption after partial usage. Real token-limited acceptance must reconcile debits with captured supplier reports.
 
 - Failures return nonzero; missing environments/dependencies/devices are blocked, not passed.
 - unittest skips produce incomplete and normally nonzero. Daily `--allow-skips` permits a successful exit, not complete platform acceptance.

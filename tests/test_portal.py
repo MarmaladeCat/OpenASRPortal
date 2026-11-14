@@ -10,11 +10,12 @@ from aiohttp import ClientSession, WSMsgType, WSServerHandshakeError, web
 from aiohttp.test_utils import TestServer
 from support_auth import portal_for_tests as Portal
 
-from openasrportal.domain.asr_protocol import text_event
+from openasrportal.domain.transcript import ProviderEvent
+from openasrportal.providers.base import StreamingProvider
 from openasrportal.storage.store import Store
 
 
-class FakeProvider:
+class FakeProvider(StreamingProvider):
     text_processing = "native"
     finish_timeout = 1
 
@@ -24,11 +25,11 @@ class FakeProvider:
         self.closed = False
 
     async def open(self):
-        await self.queue.put(([text_event("partial_result", "错误预览", 0, 100)], False))
+        await self.queue.put(([ProviderEvent("sentence:0", 0, 1, "错误预览", start_ms=0, end_ms=100)], False))
 
     async def send_audio(self, data, last=False):
         if last and self.profile["configuration"].get("model") != "never_finish":
-            await self.queue.put(([text_event("final_result", "最终文本。", 0, 500)], True))
+            await self.queue.put(([ProviderEvent("sentence:0", 0, 2, "最终文本。", True, 0, 500)], True))
 
     async def receive(self):
         return await self.queue.get()
@@ -73,6 +74,82 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         return await self.client.ws_connect(
             self.url(session["streamPath"] + "?ticket=" + session["ticket"])
         )
+
+    async def test_cancel_interrupts_blocked_audio_and_end_upload(self):
+        for last in (False, True):
+            blocked = asyncio.Event()
+            cancelled = asyncio.Event()
+
+            async def send(provider, pcm, last=False):
+                blocked.set()
+                try:
+                    await asyncio.Future()
+                finally:
+                    cancelled.set()
+
+            with patch.object(FakeProvider, "send_audio", send):
+                socket = await self.ws(await self.create())
+                await socket.receive_json()
+                await socket.receive_json()
+                if last:
+                    await socket.send_bytes(bytes(2))
+                    await socket.send_json({"type": "audio.end"})
+                else:
+                    await socket.send_bytes(bytes(6400))
+                await asyncio.wait_for(blocked.wait(), 1)
+                await socket.send_json({"type": "session.cancel"})
+                self.assertEqual((await socket.receive_json(timeout=1))["type"], "session.cancelled")
+                await asyncio.wait_for(cancelled.wait(), 1)
+                await socket.close()
+
+    async def test_provider_error_preserves_classification_without_secret(self):
+        from openasrportal.providers.soniox_asr import SonioxProvider
+
+        async def fail(provider):
+            return SonioxProvider({}).parse('{"error_code":401,"error_type":"unauthenticated","error_message":"secret"}')
+
+        with patch.object(FakeProvider, "receive", fail):
+            socket = await self.ws(await self.create())
+            await socket.receive_json()
+            event = await socket.receive_json()
+            self.assertEqual(event["code"], "UPSTREAM_AUTH_FAILED")
+            self.assertFalse(event["retryable"])
+            self.assertNotIn("secret", json.dumps(event))
+            self.assertTrue(event["requestId"])
+            await socket.close()
+
+    async def test_cancel_during_initialization_is_read_without_waiting_for_open(self):
+        entered = asyncio.Event()
+        interrupted = asyncio.Event()
+
+        async def stalled(provider):
+            entered.set()
+            try:
+                await asyncio.Future()
+            finally:
+                interrupted.set()
+
+        with patch.object(FakeProvider, "open", stalled):
+            socket = await self.ws(await self.create())
+            await asyncio.wait_for(entered.wait(), 1)
+            await socket.send_json({"type": "session.cancel"})
+            self.assertEqual((await socket.receive_json(timeout=1))["type"], "session.cancelled")
+            await asyncio.wait_for(interrupted.wait(), 1)
+            await socket.close()
+
+    async def test_stalled_upload_has_bounded_backlog(self):
+        async def stalled(provider, pcm, last=False):
+            await asyncio.Future()
+
+        with patch.object(FakeProvider, "send_audio", stalled):
+            socket = await self.ws(await self.create())
+            await socket.receive_json()
+            await socket.receive_json()
+            for _ in range(3):
+                await socket.send_bytes(bytes(800000))
+            event = await socket.receive_json(timeout=1)
+            self.assertEqual(event["code"], "UPSTREAM_BUSY")
+            await socket.close()
 
     async def test_authentication_and_profile_redaction(self):
         async with self.client.get(self.url("/v1/profiles")) as response:
@@ -158,11 +235,33 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
             await socket.receive_json()
         await one.send_json({"type": "session.cancel"})
         self.assertEqual((await one.receive_json())["type"], "session.cancelled")
+        await two.send_bytes(bytes(2))
         await two.send_json({"type": "audio.end"})
         self.assertEqual((await two.receive_json())["type"], "transcript.final")
         self.assertEqual((await two.receive_json())["type"], "session.finished")
         await one.close()
         await two.close()
+
+    async def test_http_cancel_racing_finalization_has_one_terminal(self):
+        session = await self.create()
+        socket = await self.ws(session)
+        await socket.receive_json()  # ready
+        await socket.receive_json()  # preview
+        await socket.send_bytes(bytes(2))
+        await socket.send_json({"type": "audio.end"})
+        async with self.client.delete(self.url("/v1/sessions/" + session["sessionId"])) as response:
+            self.assertEqual(response.status, 200)
+        events = []
+        async for message in socket:
+            if message.type == WSMsgType.TEXT:
+                events.append(json.loads(message.data))
+        terminals = [event for event in events if event["type"] in {
+            "session.finished", "session.cancelled", "session.error",
+        }]
+        self.assertEqual(len(terminals), 1)
+        self.assertIn(terminals[0]["type"], {"session.finished", "session.cancelled"})
+        self.assertIs(events[-1], terminals[0])
+        await socket.close()
 
     async def test_idempotency_expiration_and_ticket_single_use(self):
         first = await self.create(clientRequestId="unique")
@@ -181,6 +280,51 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         ) as response:
             self.assertEqual(response.status, 401)
         await socket.close()
+
+    async def test_idempotency_rejects_changed_parameters_and_invalid_audio(self):
+        await self.create(clientRequestId="bound-request")
+        for changes, code in (({"purpose": "translation"}, "REQUEST_CONFLICT"),
+                              ({"profileId": "other"}, "REQUEST_CONFLICT"),
+                               ({"audio": {}}, "UNSUPPORTED_AUDIO"),
+                               ({"audio": {"encoding": "pcm_s16le", "sampleRate": 16000, "channels": True}}, "UNSUPPORTED_AUDIO"),
+                              ({"protocolVersion": True}, "UNSUPPORTED_PROTOCOL"),
+                              ({"requiredFeatures": ["future-feature"]}, "UNSUPPORTED_FEATURE")):
+            async with self.client.post(self.url("/v1/sessions"), json={
+                "profileId": "local", "clientRequestId": "bound-request", **changes,
+            }) as response:
+                self.assertEqual((await response.json())["error"]["code"], code)
+        self.assertEqual(len(self.portal.sessions), 1)
+
+    async def test_websocket_cancel_after_audio_end_is_immediate(self):
+        self.store.save("local", "不定稿", "openlocalasr", {"model": "never_finish"})
+        session = await self.create()
+        socket = await self.ws(session)
+        await socket.receive_json()
+        await socket.receive_json()
+        await socket.send_json({"type": "audio.end"})
+        await socket.send_json({"type": "audio.end"})
+        await socket.send_json({"type": "session.cancel"})
+        event = await socket.receive_json(timeout=.5)
+        self.assertEqual(event["type"], "session.cancelled")
+        self.assertEqual((await socket.receive()).type, WSMsgType.CLOSE)
+        await socket.close()
+
+    async def test_audio_after_end_and_malformed_controls_are_client_errors(self):
+        self.store.save("local", "不定稿", "openlocalasr", {"model": "never_finish"})
+        for malformed in (False, True):
+            socket = await self.ws(await self.create())
+            await socket.receive_json()
+            await socket.receive_json()
+            if malformed:
+                await socket.send_str("{")
+            else:
+                await socket.send_bytes(bytes(2))
+                await socket.send_json({"type": "audio.end"})
+                await socket.send_bytes(bytes(640))
+            event = await socket.receive_json()
+            self.assertEqual(event["code"], "INVALID_REQUEST" if malformed else "INVALID_STATE")
+            self.assertFalse(event["retryable"])
+            await socket.close()
 
     async def test_invalid_audio_and_finalize_timeout_are_not_success(self):
         session = await self.create()
@@ -210,6 +354,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         socket = await self.ws(session)
         await socket.receive_json()
         await socket.receive_json()
+        await socket.send_bytes(bytes(2))
         await socket.send_json({"type": "audio.end"})
         event = await socket.receive_json()
         self.assertEqual((event["type"], event["code"]), ("session.error", "FINALIZATION_TIMEOUT"))
@@ -217,6 +362,67 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.01)
         self.assertNotIn(session["sessionId"], self.portal.sessions)
         self.assertTrue(self.providers[0].closed)
+
+    async def test_recording_deadline_does_not_consume_finalization_budget(self):
+        self.portal.recording_timeout = .15
+        original = FakeProvider.send_audio
+
+        async def delayed(provider, data, last=False):
+            if last:
+                await asyncio.sleep(.2)
+            await original(provider, data, last)
+
+        with patch.object(FakeProvider, "send_audio", delayed):
+            for quota in (False, True):
+                with self.subTest(quota=quota):
+                    if quota:
+                        self.store.usage.update_quota("profile", "local", {"remainingSeconds": .2})
+                    session = await self.create()
+                    socket = await self.ws(session)
+                    ready = await socket.receive_json()
+                    await socket.receive_json()
+                    self.assertEqual(ready["finalizeTimeoutMs"], session["limits"]["finalizeTimeoutMs"])
+                    await asyncio.sleep(.05)
+                    await socket.send_bytes(bytes(6400))
+                    if not quota:
+                        await socket.send_json({"type": "audio.end"})
+                    self.assertEqual((await socket.receive_json(timeout=2))["type"], "transcript.final")
+                    done = await socket.receive_json(timeout=2)
+                    self.assertEqual((done["type"], done["finalCount"]), ("session.finished", 1))
+                    if quota:
+                        self.assertEqual(done["reason"], "quota_exhausted")
+                    self.assertEqual((await socket.receive()).type, WSMsgType.CLOSE)
+                    await socket.close()
+
+    async def test_recording_and_finalization_timeouts_have_distinct_terminal_errors(self):
+        self.portal.recording_timeout = .05
+        self.store.save("local", "不定稿", "openlocalasr", {"model": "never_finish"})
+        with patch.object(FakeProvider, "finish_timeout", .15):
+            for end, code in ((False, "SESSION_TIMEOUT"), (True, "FINALIZATION_TIMEOUT")):
+                socket = await self.ws(await self.create())
+                await socket.receive_json()
+                await socket.receive_json()
+                if end:
+                    await socket.send_bytes(bytes(2))
+                    await socket.send_json({"type": "audio.end"})
+                error = await socket.receive_json(timeout=2)
+                self.assertEqual((error["type"], error["code"]), ("session.error", code))
+                self.assertEqual((await socket.receive()).type, WSMsgType.CLOSE)
+                await socket.close()
+
+    async def test_cancel_remains_available_after_recording_budget_during_finalization(self):
+        self.portal.recording_timeout = .05
+        self.store.save("local", "不定稿", "openlocalasr", {"model": "never_finish"})
+        socket = await self.ws(await self.create())
+        await socket.receive_json()
+        await socket.receive_json()
+        await socket.send_bytes(bytes(2))
+        await socket.send_json({"type": "audio.end"})
+        await asyncio.sleep(.1)
+        await socket.send_json({"type": "session.cancel"})
+        self.assertEqual((await socket.receive_json(timeout=.5))["type"], "session.cancelled")
+        self.assertEqual((await socket.receive()).type, WSMsgType.CLOSE)
+        await socket.close()
 
     async def test_failed_websocket_upgrade_releases_capacity_and_finishes_usage(self):
         self.portal.max_sessions = 1
@@ -278,6 +484,63 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
             begin.assert_not_called()
             self.assertNotIn(session["sessionId"], self.portal.sessions)
             self.assertTrue(self.providers[0].closed)
+
+    async def test_audio_and_end_before_ready_are_rejected(self):
+        entered = asyncio.Event()
+
+        async def blocked(provider):
+            entered.set()
+            await asyncio.Future()
+
+        with patch.object(FakeProvider, "open", blocked):
+            for audio in (True, False):
+                entered.clear()
+                socket = await self.ws(await self.create())
+                await entered.wait()
+                if audio:
+                    await socket.send_bytes(bytes(2))
+                else:
+                    await socket.send_json({"type": "audio.end"})
+                event = await socket.receive_json(timeout=1)
+                self.assertEqual((event["type"], event["code"]), ("session.error", "INVALID_STATE"))
+                await socket.close()
+
+    async def test_real_finish_barrier_controls_timeout_and_cancellation(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def finish(provider):
+            entered.set()
+            await release.wait()
+            await provider.send_audio(b"", last=True)
+
+        with patch.object(FakeProvider, "finish_input", finish), patch.object(FakeProvider, "finish_timeout", .03):
+            for outcome in ("success", "timeout", "cancel"):
+                entered.clear()
+                release.clear()
+                descriptor = await self.create()
+                session = self.portal.sessions[descriptor["sessionId"]]
+                session.limits["uploadTimeoutMs"] = 30 if outcome == "timeout" else 1000
+                socket = await self.ws(descriptor)
+                await socket.receive_json()
+                await socket.receive_json()
+                await socket.send_bytes(bytes(6400))
+                await socket.send_json({"type": "audio.end"})
+                await entered.wait()
+                if outcome == "success":
+                    # Exceed the recognition budget while commit is still blocked.
+                    await asyncio.sleep(.08)
+                    self.assertFalse(session.terminal)
+                    release.set()
+                    self.assertEqual((await socket.receive_json(timeout=1))["type"], "transcript.final")
+                    event = await socket.receive_json(timeout=1)
+                    self.assertEqual(event["type"], "session.finished")
+                    self.assertEqual((event["acceptedAudioSamples"], event["submittedAudioSamples"]), (3200, 3200))
+                elif outcome == "timeout":
+                    self.assertEqual((await socket.receive_json(timeout=1))["code"], "UPLOAD_TIMEOUT")
+                else:
+                    await socket.send_json({"type": "session.cancel"})
+                    self.assertEqual((await socket.receive_json(timeout=1))["type"], "session.cancelled")
+                await socket.close()
 
     async def test_unsaved_connection_test_does_not_create_or_update_profile(self):
         async with self.client.post(

@@ -19,6 +19,7 @@ export const dynamicMessages = {
   '有未保存的修改；保存后更新 Portal 状态，下一轮录音生效。':
     'Unsaved changes. Save to update Portal; changes apply to the next recording.',
   不限: 'Unlimited',
+  '录音上限 {0} 秒': 'Recording limit: {0} s',
   '{0} 小时 {1} 分': '{0} h {1} min',
   '{0} 分 {1} 秒': '{0} min {1} s',
   '{0} 秒': '{0} s',
@@ -199,6 +200,17 @@ export const dynamicMessages = {
   '官方 WebSocket 地址': 'Official WebSocket address',
   模型资源: 'Model resource',
   二遍识别: 'Second-pass recognition',
+  '开启会启用上游静音断句；关闭时使用上游语义分句。':
+    'Enabling this uses upstream silence segmentation; otherwise upstream semantic segmentation applies.',
+  '仅二遍识别生效；默认 5000 毫秒以容纳思考停顿，允许 300–5000 毫秒。':
+    'Only applies to second-pass recognition; defaults to 5,000 ms for thinking pauses, within 300–5000 ms.',
+  '由百炼上游断句；建议 6000 毫秒以容纳思考停顿。':
+    'Bailian segments upstream; 6,000 ms accommodates thinking pauses.',
+  上游自动端点检测: 'Automatic upstream endpoint detection',
+  '默认关闭；稳定 token 有序提交，可变尾部继续预览。开启后上游另发端点标记。':
+    'Off by default: stable tokens are committed in order while the mutable suffix remains a preview. Enable for upstream endpoint markers.',
+  'auto 自动识别，或 zh / en 等两位语言代码；完整上传，停止录音后返回文本，无逐字预览。':
+    'Use auto or a two-letter hint such as zh / en. All audio is uploaded; text returns after recording stops, without word-by-word previews.',
   '百炼 · Qwen ASR Streaming': 'Bailian · Qwen ASR Streaming',
   '百炼 WebSocket 地址（DashScope）': 'Bailian WebSocket address (DashScope)',
   '使用北京或新加坡业务空间的 WSS 地址，路径为 /api-ws/v1/inference。':
@@ -213,5 +225,31 @@ export const dynamicMessages = {
   识别语种: 'Recognition language',
   自动: 'Automatic',
   '断句静音（毫秒）': 'Segmentation silence (ms)',
-  保留方言表达: 'Preserve dialect expressions'
+  保留方言表达: 'Preserve dialect expressions',
+  'OpenLocalASR · 完整录音文件': 'OpenLocalASR · Complete recording',
+  'HTTP WAV 地址': 'HTTP WAV endpoint',
+  'OpenAI · 完整录音文件': 'OpenAI · Complete recording',
+  'OpenAI · Realtime 转写': 'OpenAI · Realtime transcription',
+  官方转写地址: 'Official transcription endpoint',
+  文件响应模式: 'File response mode',
+  完整结果: 'Complete result',
+  录音中预览: 'Preview during recording',
+  停止后逐步出字: 'Incremental text after stopping',
+  提交后逐步出字: 'Incremental text after commit',
+  停止后识别: 'Recognition after stopping',
+  预览时机未知: 'Preview timing unknown',
+  稳定词块: 'Stable token batches',
+  稳定分句: 'Stable utterances',
+  整轮定稿: 'Whole-round final',
+  稳定粒度未知: 'Stability unit unknown',
+  'gpt-live-transcribe · 录音中预览': 'gpt-live-transcribe · Preview during recording',
+  'gpt-transcribe · 提交后转写': 'gpt-transcribe · Transcription after commit',
+  实时预览延迟档位: 'Live preview delay',
+  服务默认: 'Service default',
+  '预期语种（逗号分隔）': 'Expected languages (comma-separated)',
+  '转写背景提示（最多 4096 字符）': 'Transcription context prompt (up to 4,096 characters)',
+  'OpenAI 关键词不传权重；Portal 限制 100 个词及 4096 UTF-8 字节':
+    'OpenAI keywords have no weights; Portal limits them to 100 terms and 4,096 UTF-8 bytes',
+  上游报告时长: 'Provider-reported duration',
+  用量未知作用域: 'Scopes with unknown usage'
 };

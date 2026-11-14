@@ -6,7 +6,7 @@ The complete downstream reference for OpenASRInput and other clients, describing
 
 ## 1. Responsibilities, addresses, and authentication
 
-The `boson_realtime` provider reports `partialResults: false`, `latencyClass: segmented`, and no token/session-hotword support. It uploads audio live and emits `transcript.final` after pauses, at 15 seconds, or on `audio.end`. Clients must accept finals without preceding partials; the existing v1 event schema is unchanged. See [Boson behavior](boson-api-setup.md).
+The `boson_realtime` provider reports `partialResults: false`, `latencyClass: segmented`, `finalization: audio.end`, and no token/session-hotword support. All audio uploads live, with a final after recording ends and no local silence/15-second segmentation. Clients must accept finals without preceding partials. See [Boson behavior](boson-api-setup.md) and the [copyable Python client](python-client.md).
 
 - Default origin: `http://127.0.0.1:10087`. Input takes an HTTP(S) origin without a business path, query, or user/password.
 - Clients capture/resample audio, display waveforms/preedit, identify targets, and commit text.
@@ -59,6 +59,8 @@ Health neither establishes configured upstreams/remaining quota nor creates a re
   "maxSessions": 8,
   "maxRecordingMs": 300000,
   "resumable": false,
+  "features": ["cancelDuringFinalization", "requestConflictDetection"],
+  "limits": {"maxMessageBytes": 1048576, "recommendedChunkBytes": 6400, "maxAudioBytes": 9600000, "ticketTtlMs": 30000},
   "hotwords": {
     "version": 1,
     "path": "/v1/hotwords",
@@ -111,7 +113,9 @@ Returns `profiles`, `defaultProfileId`, and administrator-defined `profileOrder`
 }
 ```
 
-Other configuration fields depend on provider; keys are never echoed. quota may be null. profileId is a Portal profile ID, not a model name; session creation does not directly select an upstream model. latencyClass `streaming` means streaming; `segmented` means segmented/polling previews, with different latency expectations.
+Other configuration fields depend on provider; keys are never echoed. quota may be null. profileId is a Portal profile ID, not a model name; session creation does not directly select an upstream model. `latencyClass=streaming` means preview during capture; `segmented` is a legacy fallback for other or unknown timing, not a promise of polling previews.
+
+`capabilities.recognition` separately describes upstream input, processing mode, preview phase, stable unit, completion and second-pass support. `capabilities.limits` gives effective budgets. The full field definitions and workflow matrix are in [Recognition workflows and ordered results](recognition-contract.md). File SSE and commit-triggered WS transcription do not imply live previews. Require `realtimePreview` when live text is necessary; profiles with limits below 300 seconds require `effectiveSessionLimits`.
 
 ## 4. Session creation and single-use connection
 
@@ -132,6 +136,10 @@ Other configuration fields depend on provider; keys are never echoed. quota may 
 | clientRequestId | Optional text, up to 200 characters; recommend one UUID per round             |
 | purpose         | Current Input sends dictation; describes purpose without granting permissions |
 | audio           | Optional; if present must exactly match negotiated PCM16 / 16 kHz / mono      |
+| protocolVersion | Optional integer, defaults to 1; other versions return UNSUPPORTED_PROTOCOL |
+| requiredFeatures | Optional string array; each item must appear in capabilities.features |
+
+`purpose` is a nonempty string of at most 100 characters, default `dictation`. Unsupported necessary features return `UNSUPPORTED_FEATURE` before allocation. Ignore additive optional fields; explicitly require a feature if your client depends on its semantics. Profile capabilities also include `localSegmentation: false` and `finalization: audio.end | upstream`. All accepted PCM (including silence) is forwarded; transport batches do not segment sentences. These fields describe adapter policy, not guaranteed upstream punctuation. Older servers may omit them.
 
 Nonempty profileId matches `[A-Za-z0-9][A-Za-z0-9_.-]{0,99}`. Explicitly selecting a missing/disabled profile never silently falls back. Creation resolves/pins the default, upstream configuration, and this key's hotword selection.
 
@@ -142,13 +150,16 @@ Success **201**:
   "sessionId": "session-example",
   "ticket": "one-time-ticket-example",
   "streamPath": "/v1/sessions/session-example/stream",
-  "ticketExpiresInMs": 29999
+  "ticketExpiresInMs": 29999,
+  "readyTimeoutMs": 45000
 }
 ```
 
 Tickets default to 30 seconds and one use. TTL is remaining milliseconds, not a hard-coded example value. Input verifies the exact same-origin session stream path before using the original Portal's WS/WSS origin.
 
-**Creation retry idempotency:** the same key and nonempty clientRequestId return the same unconnected, unexpired descriptor without extending TTL. An established WS returns 409 `SESSION_STARTED`. After termination/expiry cleanup, the request ID no longer guarantees the old session; never use it to replay recognized audio.
+Creation also returns the resolved `profileId`, frozen `capabilities`, and `limits`, repeated unchanged in `session.ready`. Clients negotiating `recognitionCapabilities` / `effectiveSessionLimits` must consume these snapshots. Missing optional fields on old servers mean unknown capabilities and the legacy 300-second maximum. Shorter newly negotiated limits apply to prebuffered audio too; an already-oversized recording is rejected, not silently truncated.
+
+**Creation retry idempotency:** the same key, nonempty clientRequestId and normalized profile selection/purpose/required features reuse an unconnected, unexpired descriptor without extending TTL. Changed parameters return 409 `REQUEST_CONFLICT`; retries still pass all request validation. An established WS returns 409 `SESSION_STARTED`. After termination/expiry cleanup, the ID no longer guarantees the old session; never use it to replay recognized audio.
 
 ### 4.2 WebSocket handshake
 
@@ -167,8 +178,9 @@ HTTPS uses WSS. After HTTP upgrade, Portal connects upstream; await `session.rea
 - Each chunk has an even byte count. Input chunks are nonempty and contain complete 16-bit samples.
 - 20 ms = 640 bytes; 200 ms = 6400 bytes. Portal batches upstream sends at 6400 bytes.
 - Read events continuously while uploading; do not wait for all upload data to finish.
-- Maximum WS message: 1 MiB. Maximum recording: 300 seconds / 9600000 bytes.
-- Input proactively finalizes around 295 seconds, leaving margin under five minutes.
+- Maximum WS message: 1 MiB. Global recording maximum: 300 seconds / 9600000 bytes; each session uses its smaller effective `limits.maxRecordingMs` when present.
+- From ready, Portal waits at most the effective recording budget for `audio.end` or quota end; otherwise it returns `SESSION_TIMEOUT`. Source sample count independently enforces the same limit.
+- Input pauses at the smaller of 295 seconds and the negotiated limit, measured from capture startup including pre-ready buffering; its cumulative PCM budget also includes stop-time tails.
 - Portal uses a 30-second WS heartbeat, not an application `ping` command.
 
 ### 5.2 Normal finalization
@@ -179,7 +191,9 @@ Send one text JSON message:
 { "type": "audio.end" }
 ```
 
-Stop uploading, but keep receiving partials/finals until `session.finished` or a failure terminal event. audio.end flushes the incomplete PCM batch. Closing the socket is not finalization. Input sets a one-shot deadline from ready.finalizeTimeoutMs; new partials do not extend it.
+Stop uploading, but keep receiving until a terminal event. `audio.end` drains trailing PCM and invokes the adapter's real submission barrier; closing the socket is not finalization. The barrier includes private upload queues, converter tails and WS commit or the last HTTP body byte plus writer drain. File providers submit the complete recording once, after end. Control reading remains independent and cancellable. Portal bounds queued PCM to 60 seconds, each write to 15 seconds, and end-to-submission to `uploadTimeoutMs` (75 seconds). Doubao preserves real-time pacing. Only after submission does `recognitionTimeoutMs` begin; expiration returns `FINALIZATION_TIMEOUT`. Upload expiration is `UPLOAD_TIMEOUT`. `finalizeTimeoutMs` includes both budgets and a one-second margin; partials do not renew it. Zero-source-sample rounds finish locally with no file request or commit; nonzero silence is uploaded normally.
+
+Repeated audio.end is an idempotent no-op. Audio after explicit end returns `INVALID_STATE`. In-flight audio after automatic quota finalization may be discarded. Invalid control JSON or unknown control types return `INVALID_REQUEST`.
 
 ### 5.3 Cancellation
 
@@ -197,6 +211,8 @@ DELETE /v1/sessions/{sessionId}
 
 Success is `{"ok":true}`, including absent/already-cleaned sessions. An existing session owned by another key returns 403. A key may cancel any owned session, but clients should cancel only IDs they created. Cancellation abandons a round, unlike audio.end's finalization; session.cancelled is not successful finished.
 
+WS cancellation works after audio.end while awaiting upstream finalization. Exactly one terminal wins a finish/cancel race; cancellation after a terminal is a no-op. Already-delivered stable text cannot be retracted.
+
 ## 6. Server events and result ledger
 
 ### 6.1 Common fields
@@ -212,12 +228,12 @@ Every event contains `type`, `sessionId`, and `seq`. seq increases from 1 within
   "seq": 1,
   "audio": { "encoding": "pcm_s16le", "sampleRate": 16000, "channels": 1 },
   "textProcessing": "native",
-  "finalizeTimeoutMs": 11000,
+  "finalizeTimeoutMs": 81000,
   "hotwords": { "supported": true, "appliedCount": 2, "omittedCount": 0 }
 }
 ```
 
-Ready occurs once. Verify audio and a positive integer finalizeTimeoutMs. Timeout depends on provider. Hotword counts describe the creation snapshot, not the entire personal list. supported=true does not mean enabled; the default-off switch gives appliedCount 0.
+Ready occurs once. Allow the creation descriptor's `readyTimeoutMs` (45 seconds): token-account queueing and provider initialization each allow 20 seconds. Cancellation remains available throughout. Verify audio and a positive `finalizeTimeoutMs`; it depends on provider and includes upload draining. Hotword counts describe the creation snapshot, not the entire personal list. `supported=true` does not mean enabled.
 
 ### 6.3 transcript.partial and transcript.final
 
@@ -259,6 +275,8 @@ Ready occurs once. Verify audio and a positive integer finalizeTimeoutMs. Timeou
 
 Partials replace preedit at higher revisions. A final closes the utterance; finalized text cannot change, and the next utterance has a new ID. Ignore old revisions but consume their new seq. Duplicate finals never recommit; changed final text is a protocol error. Empty finals count toward finalCount even without characters to commit. All providers use these final fields.
 
+Portal publishes an immutable audio-ordered prefix and one replaceable preview tail. It resolves interleaved upstream results and second-pass corrections before publishing final. One public utterance may combine multiple supplier units; a final may shorten the previous preview, followed by a new-ID preview for the remaining tail. `seq` does not establish upstream audio order. Missing order evidence, conflicting finals or unresolved units (even empty candidates) prevent success. Unknown timestamps are `null`, not fabricated word times.
+
 ### 6.4 Success, cancellation, and error terminals
 
 ```json
@@ -266,6 +284,8 @@ Partials replace preedit at higher revisions. A final closes the utterance; fina
 ```
 
 finalCount must equal the unique finals received. Input also requires no nonempty unfinalized preview. Socket closure without a terminal event is not success.
+
+Finished also reports `acceptedAudioSamples` and `submittedAudioSamples` at the source rate (16 kHz). These describe Portal acceptance and local upstream-write completion, not vendor processing acknowledgements. Quota completion includes `truncated: true`; ordinary recording-limit violations fail with `AUDIO_LIMIT` rather than silently clipping the input.
 
 Automatic finalization when quota runs out:
 
@@ -456,7 +476,7 @@ The example message means “invalid Portal access credentials.” Branch on cod
 | 502  | DICTIONARY_DOWNLOAD_FAILED                                             | Online download failed; manually download and preview a file |
 | 503  | NO_UPSTREAM_AVAILABLE                                                  | All default candidates unavailable; wait for recovery        |
 
-WS errors use session.error, including AUDIO_LIMIT, SESSION_TIMEOUT, FINALIZATION_TIMEOUT, UPSTREAM_CLOSED, CLIENT_DISCONNECTED, and UPSTREAM_ERROR; some parse/upstream exceptions collapse to UPSTREAM_ERROR. Stop capture/upload, clear this round's preedit, and retain unconfirmed text. New recordings use new generation/sessionId/ticket. requestId aids diagnosis.
+WS errors use `session.error`. Recognized upstream authentication, quota and parameter failures use `UPSTREAM_AUTH_FAILED`, `UPSTREAM_QUOTA_EXHAUSTED` and `UPSTREAM_INVALID_REQUEST` with `retryable=false`; throttling uses `UPSTREAM_BUSY`. Upload stalls use `UPLOAD_TIMEOUT`; invalid result identity/order/stability uses non-retryable `UPSTREAM_PROTOCOL_ERROR`. Unknown failures remain `UPSTREAM_ERROR`. Raw upstream messages/keys are never echoed; `requestId` identifies this failure. Recording, finalization and early-close failures retain distinct codes. Stop capture/upload and retain unconfirmed text; a retry starts a new session, never replays the old one.
 
 ## 10. Minimal sequence and HTTP examples
 

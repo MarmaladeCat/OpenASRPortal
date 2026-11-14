@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import ipaddress
 import json
-import logging
 import re
 import secrets
 import time
@@ -17,13 +16,16 @@ from aiohttp import WSMsgType, web
 
 from ..application.dictionary_sources import catalog, seed_public_dictionaries, source_content
 from ..application.meter import SessionMeter
+from ..application.recognition import RecognitionSession
 from ..application.session import Session
-from ..diagnostics import checkpoint, mark, session_tag, span, trace_request
+from ..diagnostics import session_tag, span, trace_request
 from ..domain.config import validate_config
 from ..domain.dictionaries import FORMATS, parse_dictionary
 from ..domain.events import EventStream
 from ..domain.management import contract
-from ..providers.legacy import PROVIDERS, test_connection
+from ..providers.file_audio import RecordingBudget
+from ..providers.probe import test_connection
+from ..providers.registry import PROVIDERS, definition
 from ..providers.transport import test_proxy
 from ..storage.auth import AuthError
 from ..storage.hotwords import HotwordConflict
@@ -33,6 +35,8 @@ from ..storage.usage import UsageError
 
 AUDIO = {"encoding": "pcm_s16le", "sampleRate": 16000, "channels": 1}
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}")
+FEATURES = ["cancelDuringFinalization", "requestConflictDetection", "effectiveSessionLimits",
+            "recognitionCapabilities", "realtimePreview"]
 
 
 class PortalError(Exception):
@@ -87,6 +91,18 @@ async def boundary(request, handler):
             },
             status=400,
         )
+    except web.HTTPException as error:
+        if 300 <= error.status < 400:
+            response = web.Response(status=error.status, headers=error.headers, body=error.body)
+        else:
+            code = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED", 413: "REQUEST_TOO_LARGE"}.get(
+                error.status, "HTTP_ERROR"
+            )
+            response = web.json_response(
+                {"error": {"code": code, "message": error.reason, "requestId": request_id}},
+                status=error.status,
+                headers={key: value for key, value in error.headers.items() if key in {"Allow", "Retry-After"}},
+            )
     except ValueError as error:
         response = web.json_response(
             {"error": {"code": "INVALID_REQUEST", "message": str(error), "requestId": request_id}},
@@ -122,12 +138,16 @@ def loopback(host):
 
 
 class Portal:
+    recording_timeout = 300
+
     def __init__(self, store, factory=None, max_sessions=8, ticket_ttl=30, listen_host="127.0.0.1"):
         self.store, self.listen_host = store, listen_host
+        self.recording_budget = RecordingBudget()
         seed_public_dictionaries(store.public_dictionaries)
         self.factory = factory or (
             lambda profile: PROVIDERS[profile["provider"]]({
                 **profile["configuration"],
+                "_recordingBudget": self.recording_budget,
                 "_proxy": self.store.proxy.runtime()
                 if profile["configuration"].get("useProxy") else None,
             })
@@ -389,6 +409,9 @@ class Portal:
                 "maxSessions": self.max_sessions,
                 "maxRecordingMs": 300000,
                 "resumable": False,
+                "features": FEATURES,
+                "limits": {"maxMessageBytes": 1048576, "recommendedChunkBytes": 6400,
+                           "maxAudioBytes": 9600000, "ticketTtlMs": int(self.ticket_ttl * 1000)},
                 "hotwords": {
                     "version": 1,
                     "path": "/v1/hotwords",
@@ -787,23 +810,34 @@ class Portal:
         self.store.usage.new_session(identity, None, billing_profile, "probe")
         self.store.usage.activate(identity)
         meter = None
-        original_open, original_send = provider.open, provider.send_audio
+        original_open, original_write = provider.open, provider.write_audio
+        original_finish = provider.finish_input
+        deferred = getattr(provider, "deferred_request", False)
         if getattr(provider, "token_metered", False):
             meter = SessionMeter(self.store.usage, identity, self.billing_locks)
-            provider.usage_callback = meter.response
+            provider.usage_callback = meter.scoped if getattr(provider, "scoped_usage", False) else meter.response
 
         async def metered_open():
             if meter:
-                await asyncio.wait_for(meter.start(), 20)
+                await asyncio.wait_for(meter.start(deferred=deferred), 20)
             await original_open()
-            if not meter:
+            if not meter and not deferred:
                 self.store.usage.begin_call(identity)
 
-        async def metered_send(pcm, last=False):
-            accepted, scope = self.store.usage.accept_audio(identity, len(pcm))
-            await original_send(pcm[:accepted], last=last or scope is not None)
+        async def metered_write(pcm):
+            accepted, _ = self.store.usage.accept_audio(identity, len(pcm))
+            await original_write(pcm[:accepted])
 
-        provider.open, provider.send_audio = metered_open, metered_send
+        async def metered_finish():
+            if deferred:
+                if meter:
+                    meter.begin(accepted_audio=True)
+                else:
+                    self.store.usage.begin_call(identity, accepted_audio=True)
+            await original_finish()
+
+        provider.open, provider.write_audio = metered_open, metered_write
+        provider.finish_input = metered_finish
         result = {}
         try:
             with self.store.connection() as db:
@@ -837,20 +871,35 @@ class Portal:
         request_id = body.get("clientRequestId", "")
         if not isinstance(request_id, str) or len(request_id) > 200:
             raise PortalError("INVALID_REQUEST", "clientRequestId 无效")
-        for session in self.sessions.values():
-            if request_id and session.owner == owner and session.request_id == request_id:
-                if session.ws is not None:
-                    raise PortalError("SESSION_STARTED", "该请求已建立识别连接", 409)
-                return self.session_response(session)
-        if len(self.sessions) >= self.max_sessions:
-            raise PortalError("UPSTREAM_BUSY", "Portal 会话容量已满", 429)
-        if body.get("audio", AUDIO) != AUDIO:
+        version = body.get("protocolVersion", 1)
+        if type(version) is not int or version != 1:
+            raise PortalError("UNSUPPORTED_PROTOCOL", "仅支持协议 v1")
+        required = body.get("requiredFeatures", [])
+        if not isinstance(required, list) or any(not isinstance(item, str) for item in required):
+            raise PortalError("INVALID_REQUEST", "requiredFeatures 必须为字符串数组")
+        if any(item not in FEATURES for item in required):
+            raise PortalError("UNSUPPORTED_FEATURE", "请求了不支持的协议能力")
+        purpose = body.get("purpose", "dictation")
+        if not isinstance(purpose, str) or not purpose or len(purpose) > 100:
+            raise PortalError("INVALID_REQUEST", "purpose 必须为 1–100 字符的字符串")
+        audio = body.get("audio", AUDIO)
+        if audio != AUDIO or any(type(audio[key]) is not type(value) for key, value in AUDIO.items()):
             raise PortalError("UNSUPPORTED_AUDIO", "当前支持 PCM16 / 16kHz / 单声道")
         profile_id = body.get("profileId")
         if profile_id is not None and (
             not isinstance(profile_id, str) or (profile_id and not ID.fullmatch(profile_id))
         ):
             raise PortalError("INVALID_PROFILE", "识别配置 ID 无效")
+        request_spec = (profile_id or "", purpose, tuple(sorted(set(required))))
+        for session in self.sessions.values():
+            if request_id and session.owner == owner and session.request_id == request_id:
+                if session.request_spec != request_spec:
+                    raise PortalError("REQUEST_CONFLICT", "clientRequestId 已用于不同的请求参数", 409)
+                if session.ws is not None:
+                    raise PortalError("SESSION_STARTED", "该请求已建立识别连接", 409)
+                return self.session_response(session)
+        if len(self.sessions) >= self.max_sessions:
+            raise PortalError("UPSTREAM_BUSY", "Portal 会话容量已满", 429)
         if not profile_id:
             profile_id = self.store.settings()["defaultProfileId"]
             if not profile_id:
@@ -872,6 +921,12 @@ class Portal:
             profile = self.store.get(profile_id)
         if profile is None:
             raise PortalError("PROFILE_NOT_FOUND", "识别配置不存在", 404)
+        capabilities = definition(profile["provider"]).capabilities(profile["configuration"])
+        if (capabilities["limits"]["maxRecordingMs"] < 300000
+                and "effectiveSessionLimits" not in required):
+            raise PortalError("UNSUPPORTED_FEATURE", "此配置要求客户端协商并遵守有效录音上限")
+        if "realtimePreview" in required and capabilities["recognition"]["preview"]["phase"] != "during_capture":
+            raise PortalError("UNSUPPORTED_FEATURE", "此配置不支持录音中实时预览")
         with span("quotaCheck"):
             self.store.usage.check(owner, profile)
         with span("hotwordsSelection"):
@@ -888,6 +943,9 @@ class Portal:
             request_id,
         )
         session.stream = EventStream(session.id)
+        session.capabilities = capabilities
+        session.limits = capabilities["limits"]
+        session.request_spec = request_spec
         session_tag(session.id)
         session.hotword_selection = {
             "supported": selection["capability"]["supported"],
@@ -906,6 +964,10 @@ class Portal:
                 "ticket": session.ticket,
                 "streamPath": f"/v1/sessions/{session.id}/stream",
                 "ticketExpiresInMs": max(0, int((session.expires - time.monotonic()) * 1000)),
+                "readyTimeoutMs": session.limits["readyTimeoutMs"],
+                "profileId": session.profile["id"],
+                "capabilities": session.capabilities,
+                "limits": session.limits,
             },
             status=201,
         )
@@ -916,6 +978,8 @@ class Portal:
         if session is not None:
             if session.owner != owner:
                 raise PortalError("AUTH_FAILED", "会话不属于当前调用方", 403)
+            if session.terminal:
+                return web.json_response({"ok": True})
             session.cancelled = True
             await session.emit("session.cancelled")
             if session.ws is not None and session.ws.prepared:
@@ -948,8 +1012,7 @@ class Portal:
         session.ticket = ""
         session.ws = ws
         provider = None
-        meter = None
-        tasks = []
+        recognition = None
         outcome, error_code = "failed", ""
         try:
             with span("localWebsocketPrepare"):
@@ -960,68 +1023,18 @@ class Portal:
                 self.store.usage.activate(session.id)
             with span("providerConstruct"):
                 provider = self.factory(session.profile)
-            if getattr(provider, "token_metered", False):
-                meter = SessionMeter(
-                    self.store.usage, session.id, self.billing_locks
-                )
-                provider.usage_callback = meter.response
-                await asyncio.wait_for(meter.start(), 20)
-            with span("providerOpen"):
-                await asyncio.wait_for(provider.open(), 20)
-            if session.cancelled or ws.closed:
-                return ws
-            if not meter:
-                with span("usageBeginCall"):
-                    self.store.usage.begin_call(session.id)
-            await session.emit(
-                "session.ready",
-                audio=AUDIO,
-                textProcessing=provider.text_processing,
-                finalizeTimeoutMs=int((provider.finish_timeout + 1) * 1000),
-                hotwords=session.hotword_selection,
-            )
-            mark("readySent")
-            checkpoint("ready")
-            ended = asyncio.Event()
+            recognition = RecognitionSession(session, provider, self.store, self.billing_locks,
+                                             self.recording_timeout)
 
-            async def upload():
-                pending = bytearray()
-                audio_bytes = 0
-
-                async def send(pcm, last=False):
-                    try:
-                        accepted, scope = self.store.usage.accept_audio(
-                            session.id, len(pcm)
-                        )
-                    except UsageError as error:
-                        if error.code not in ("QUOTA_EXHAUSTED", "PROFILE_DISABLED"):
-                            raise
-                        accepted, scope = 0, "account"
-                    last = last or scope is not None
-                    if scope:
-                        session.quota_scope = scope
-                    await provider.send_audio(pcm[:accepted], last=last)
-                    if accepted:
-                        mark("firstUpstreamAudioSent")
-                    if last:
-                        ended.set()
-                    return not last
-
+            async def controls():
                 async for message in ws:
                     if message.type == WSMsgType.BINARY:
-                        mark("firstClientAudioReceived")
-                        if len(message.data) % 2:
-                            raise PortalError("UNSUPPORTED_AUDIO", "PCM16 字节数必须为偶数")
-                        audio_bytes += len(message.data)
-                        if audio_bytes > 16000 * 2 * 300:
-                            raise PortalError("AUDIO_LIMIT", "录音超过五分钟上限")
-                        pending.extend(message.data)
-                        while len(pending) >= 6400:
-                            if not await send(bytes(pending[:6400])):
-                                return
-                            del pending[:6400]
+                        await recognition.audio(message.data)
                     elif message.type == WSMsgType.TEXT:
-                        control = json.loads(message.data)
+                        try:
+                            control = json.loads(message.data)
+                        except ValueError:
+                            raise PortalError("INVALID_REQUEST", "控制消息 JSON 无效") from None
                         if not isinstance(control, dict):
                             raise PortalError("INVALID_REQUEST", "控制消息必须为对象")
                         if control.get("type") == "session.cancel":
@@ -1029,67 +1042,14 @@ class Portal:
                             await session.emit("session.cancelled")
                             return
                         if control.get("type") == "audio.end":
-                            mark("audioEndReceived")
-                            await send(bytes(pending), last=True)
-                            return
+                            await recognition.end()
+                            continue
                         raise PortalError("INVALID_REQUEST", "未知的控制消息")
                 raise PortalError("CLIENT_DISCONNECTED", "客户端连接已关闭")
 
-            async def download():
-                while True:
-                    events, last = await provider.receive()
-                    for raw in events:
-                        async with session.lock:
-                            if not session.cancelled:
-                                event = session.stream.transcript(raw)
-                                if event:
-                                    if event.get("text"):
-                                        mark("firstTranscript")
-                                        if event["type"] == "transcript.final":
-                                            mark("firstFinal")
-                                    await ws.send_json(event)
-                                    if event["type"] == "transcript.final":
-                                        try:
-                                            await asyncio.to_thread(
-                                                self.store.hotwords.observe, session.owner, event
-                                            )
-                                        except Exception:
-                                            # Statistics must never interrupt successful dictation.
-                                            logging.getLogger(__name__).error(
-                                                "热词统计失败，识别会话继续"
-                                            )
-                    if last:
-                        return
-
-            sender = asyncio.create_task(upload())
-            receiver = asyncio.create_task(download())
-            tasks = [sender, receiver]
-            done, _ = await asyncio.wait(tasks, timeout=300, return_when=asyncio.FIRST_COMPLETED)
-            if not done:
-                raise PortalError("SESSION_TIMEOUT", "会话超过五分钟上限")
-            for task in done:
-                task.result()
-            if session.cancelled:
-                return ws
-            if sender in done and ended.is_set():
-                try:
-                    await asyncio.wait_for(receiver, provider.finish_timeout)
-                except asyncio.TimeoutError:
-                    raise PortalError("FINALIZATION_TIMEOUT", "等待最终定稿超时") from None
-            elif receiver in done and not ended.is_set():
-                raise PortalError("UPSTREAM_CLOSED", "上游提前结束，尚未完成音频提交")
+            await recognition.run(controls)
             if not session.cancelled:
                 outcome = "quota_finished" if session.quota_scope else "finished"
-                await session.emit(
-                    "session.finished",
-                    finalCount=session.stream.final_count,
-                    **(
-                        {"reason": "quota_exhausted", "quotaScope": session.quota_scope}
-                        if session.quota_scope
-                        else {}
-                    ),
-                )
-                mark("finishedSent")
         except Exception as error:
             error_code = getattr(error, "code", "UPSTREAM_ERROR")
             if not ws.prepared:
@@ -1099,15 +1059,16 @@ class Portal:
                     "session.error",
                     code=getattr(error, "code", "UPSTREAM_ERROR"),
                     message=getattr(error, "message", "上游识别失败，请检查 Portal 配置与网络"),
-                    retryable=not isinstance(error, UsageError),
+                    retryable=getattr(error, "retryable", not isinstance(error, UsageError) and error_code not in {
+                        "INVALID_REQUEST", "INVALID_STATE", "UNSUPPORTED_AUDIO", "AUDIO_LIMIT",
+                    }),
                     requestId=secrets.token_hex(8),
                 )
         finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
             try:
-                if provider is not None:
+                if recognition is not None:
+                    await recognition.close()
+                elif provider is not None:
                     await provider.close()
             finally:
                 try:
@@ -1115,8 +1076,6 @@ class Portal:
                         session.id, "cancelled" if session.cancelled else outcome, error_code
                     )
                 finally:
-                    if meter:
-                        meter.close()
                     self.sessions.pop(session.id, None)
                     if ws.prepared:
                         await ws.close()

@@ -8,7 +8,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $install = Join-Path $env:ProgramFiles 'OpenASRPortal'
-$data = Join-Path $env:ProgramData 'OpenASRPortal'
+$data = Join-Path $env:ProgramData 'OpenASR\portal'
 $wrapper = Join-Path $install 'OpenASRPortal.exe'
 $python = Join-Path $install 'python\python.exe'
 $config = Join-Path $data 'service.json'

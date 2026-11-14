@@ -64,7 +64,7 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     if args.installed:
-        environment = Path("/var/lib/openasr/portal/service.env")
+        environment = Path("/var/lib/OpenASR/portal/service.env")
         import shlex
 
         values = {}

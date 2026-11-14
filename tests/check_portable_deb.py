@@ -44,7 +44,7 @@ def main():
         }
         configure = [str(runtime), "--configure-installation", "--root", str(stage)]
         subprocess.run(configure, env=env, cwd=stage, check=True)
-        environment = stage / "etc/openasrportal/service.env"
+        environment = stage / "var/lib/OpenASR/portal/service.env"
         previous = environment.read_bytes()
         subprocess.run(configure, env=env, cwd=stage, check=True)
         assert previous == environment.read_bytes()

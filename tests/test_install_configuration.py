@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+@unittest.skipUnless(sys.platform == "linux", "DEB/systemd configuration requires Linux paths")
 class InstallationConfigurationTests(unittest.TestCase):
     def setUp(self):
         results = ROOT / "test-results"
@@ -25,7 +27,7 @@ class InstallationConfigurationTests(unittest.TestCase):
 
     def test_fresh_install_has_loopback_and_no_credentials_or_handoff(self):
         MODULE.configure(self.root)
-        environment = self.root / "var/lib/openasr/portal/service.env"
+        environment = self.root / "var/lib/OpenASR/portal/service.env"
         self.assertIn("OPENASRPORTAL_HOST=127.0.0.1", environment.read_text())
         self.assertNotIn("KEY=", environment.read_text())
         self.assertFalse(environment.with_name("client.json").exists())
@@ -59,7 +61,7 @@ class InstallationConfigurationTests(unittest.TestCase):
         self.assertNotIn("old-admin", saved)
         self.assertNotIn("old-client", saved)
         self.assertFalse(handoff.exists())
-        self.assertEqual(saved, (self.root / "var/lib/openasr/portal/service.env").read_text())
+        self.assertEqual(saved, (self.root / "var/lib/OpenASR/portal/service.env").read_text())
         self.assertEqual(
             (self.root / "usr/share/openasrportal/admin.url").read_text().strip(),
             "http://192.0.2.5:12087/admin",
@@ -76,7 +78,7 @@ class InstallationConfigurationTests(unittest.TestCase):
         (data / "portal.db").write_bytes(b"isolated database fixture")
         (data / "asr-key-vault.key").write_bytes(b"isolated vault fixture")
         MODULE.configure(self.root, "1.0.0")
-        installed = self.root / "var/lib/openasr/portal/data"
+        installed = self.root / "var/lib/OpenASR/portal/data"
         self.assertEqual((data / "portal.db").read_bytes(), (installed / "portal.db").read_bytes())
         self.assertEqual(
             (data / "asr-key-vault.key").read_bytes(),
@@ -92,7 +94,7 @@ class InstallationConfigurationTests(unittest.TestCase):
 
     def test_removed_package_is_reinstall_even_when_dpkg_passes_previous_version(self):
         MODULE.configure(self.root)
-        directory = self.root / "var/lib/openasr/portal"
+        directory = self.root / "var/lib/OpenASR/portal"
         (directory / "pending-operation").write_text("install\n")
         MODULE.configure(self.root, "1.0.0")
         self.assertEqual(
@@ -109,7 +111,7 @@ class InstallationConfigurationTests(unittest.TestCase):
         with patch.object(MODULE.shutil, "copytree", side_effect=OSError("interrupted copy")):
             with self.assertRaises(OSError):
                 MODULE.configure(self.root)
-        destination = self.root / "var/lib/openasr/portal/data"
+        destination = self.root / "var/lib/OpenASR/portal/data"
         self.assertFalse(destination.exists())
         MODULE.configure(self.root)
         self.assertEqual(
@@ -124,7 +126,7 @@ class InstallationConfigurationTests(unittest.TestCase):
         data.mkdir(parents=True)
         (data / "portal.db").write_bytes(b"unused old database")
         MODULE.configure(self.root)
-        self.assertFalse((self.root / "var/lib/openasr/portal/data/portal.db").exists())
+        self.assertFalse((self.root / "var/lib/OpenASR/portal/data/portal.db").exists())
         self.assertEqual(
             MODULE.environment_values((legacy / "service.env").read_text())["OPENASRPORTAL_DATA"],
             "/srv/custom portal",
@@ -149,6 +151,20 @@ class InstallationConfigurationTests(unittest.TestCase):
         handoff.write_text('{"userOwned":"keep me"}', encoding="utf-8")
         MODULE.configure(self.root)
         self.assertEqual(handoff.read_text(), '{"userOwned":"keep me"}')
+
+    def test_shared_root_case_migration_keeps_vault_and_rewrites_only_default(self):
+        old = self.root / "var/lib/openasr/portal"
+        (old / "data").mkdir(parents=True)
+        (old / "service.env").write_text("OPENASRPORTAL_DATA=/var/lib/openasr/portal/data\n")
+        (old / "data/portal.db").write_bytes(b"database")
+        (old / "data/asr-key-vault.key").write_bytes(b"vault")
+        new = self.root / "var/lib/OpenASR/portal"
+        new.mkdir(parents=True)
+        (new / "pending-operation").write_text("upgrade")
+        MODULE.configure(self.root)
+        self.assertIn("/var/lib/OpenASR/portal/data", (new / "service.env").read_text())
+        for name in ("portal.db", "asr-key-vault.key"):
+            self.assertEqual((new / "data" / name).read_bytes(), (old / "data" / name).read_bytes())
 
 
 if __name__ == "__main__":

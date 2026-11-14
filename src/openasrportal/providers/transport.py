@@ -11,6 +11,17 @@ from websockets.legacy.client import connect as direct_connect
 from ..domain.asr_protocol import ProviderError
 
 
+def http_options(config):
+    if not config.get("useProxy", False):
+        return {}
+    proxy = config.get("_proxy")
+    if not proxy or not proxy.get("url"):
+        raise ProviderError("此上游已启用代理，请先在 Proxy 设置中配置代理地址")
+    auth = aiohttp.BasicAuth(proxy["username"], proxy.get("password", ""), encoding="utf-8") \
+        if proxy.get("username") else None
+    return {"proxy": proxy["url"], "proxy_auth": auth}
+
+
 async def test_proxy(proxy, target):
     """Measure an HTTPS request through CONNECT, without persisting draft settings."""
     try:

@@ -30,6 +30,7 @@ def main():
                 "OpenASRPortal/compose.yaml",
                 "OpenASRPortal/.env.example",
                 "OpenASRPortal/README.md",
+                "OpenASRPortal/README.zh-CN.md",
                 "OpenASRPortal/LICENSE",
                 "OpenASRPortal/compose.https.yaml",
                 "OpenASRPortal/nginx",

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](localasr-setup.zh-CN.md)
 
-Use this guide for Portal 1.1.1 with OpenLocalASR 0.14.0. LocalASR runs models on its own machine; it has no independent settings webpage. Install it and prepare weights using the [LocalASR user guide](https://github.com/MarmaladeCat/OpenLocalASR/blob/main/docs/user-guide.md).
+Use this guide for Portal 1.2.0 with OpenLocalASR 0.14.0. LocalASR runs models on its own machine; it has no independent settings webpage. Install it and prepare weights using the [LocalASR user guide](https://github.com/MarmaladeCat/OpenLocalASR/blob/main/docs/user-guide.md).
 
 ## Prepare the recognition service
 
@@ -28,6 +28,8 @@ The address is reached by Portal, not by the browser. In separate containers use
 Choose **Test upstream connection**; it uses the current form/proxy choice and displays the result inside the card. A successful test does not save changes: click **Save**, leave **Enabled** on, then set default or select the profile in a client. **Cancel** discards edits. If proxy routing is needed, first configure/test the global HTTP/HTTPS proxy; an unavailable enabled proxy fails without direct fallback.
 
 ## Verify speech and troubleshoot
+
+For an explicit complete-recording workflow, select **OpenLocalASR · Complete recording** (`openlocalasr_file`) and use `http://127.0.0.1:10095/api/v1/services/aigc/multimodal-generation/generation` (or the actual remote HTTPS endpoint). Keep the same active model and service key. Portal buffers one round in memory, then sends one 16 kHz WAV request after stopping. It returns no preview and limits each round to 60 seconds; the client must negotiate `effectiveSessionLimits`. The existing `openlocalasr` WS profile remains separate, with preview timing determined by the model rather than inferred from WebSocket transport.
 
 Clients use Portal's HTTP(S) URL and a Portal-issued ASR key. Try short Chinese and English phrases using a model that supports them; stop and wait for final text. The page-language dropdown is not a model-language setting. This adapter does not expose a language-list field; recognition languages and partial-result behavior depend on the selected LocalASR model.
 

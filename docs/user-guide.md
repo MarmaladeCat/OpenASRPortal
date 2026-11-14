@@ -12,7 +12,7 @@ Open **Proxy** in Portal administration and save an `http://` or `https://` prox
 
 In each upstream profile, select **Use global Proxy** and save. The selection applies to connection tests and new recognition connections for every provider. An unavailable or missing proxy produces an error rather than bypassing it. Unselected profiles connect directly. An empty global address removes the proxy; already-established recognition connections keep their route. HTTPS means TLS to the proxy itself; WSS traffic also verifies the upstream certificate. Use the service machine's trusted CA store for private proxy certificates.
 
-Version **1.1.1**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
+Version **1.2.0**. For service installation, upstream configuration, and client administration. See [recognition API](API.md), [management protocol](MANAGEMENT.md), and [GPL v3](../LICENSE). English control descriptions below include important Chinese labels for the current UI.
 
 For service activation, API keys, and matching Portal settings, see the separate [Doubao Speech](doubao-api-setup.md) and [Alibaba Cloud Model Studio](bailian-api-setup.md) setup guides.
 
@@ -24,7 +24,11 @@ Use the upper-right **中文 / English** dropdown in administration and first-ti
 
 Each upstream has a separate outlined panel with labeled, read-only fields. **Edit** unlocks that panel; **Save** applies changes and **Cancel** restores its saved values. Fixed provider fields and profile IDs stay read-only. Keys remain concealed; an empty existing-key field retains its value. The **Enabled** switch applies immediately; **Use global Proxy** is edited and saved with the profile. Tests use the currently displayed configuration, including unsaved proxy selection, and report the route, result and elapsed time inside that panel.
 
-New Soniox profiles default to English and Chinese hints (`en,zh`). Bailian and Boson default to automatic language detection, including English and Chinese; their single-language options remain available. Existing saved language selections are retained.
+New Soniox profiles default to Chinese and English hints (`zh,en`) for mostly Chinese with occasional English. Hint order does not assign language weights. Bailian and Boson default to automatic language detection; existing saved language selections are retained.
+
+Upstream cards show preview timing, stable result unit and recording limit. Choose [OpenAI Realtime](openai-api-setup.md) with `gpt-live-transcribe` for previews during capture; its `gpt-transcribe` option begins transcription after stopping. **OpenAI · Complete recording** sends one WAV after stopping: JSON returns a complete result, SSE displays incremental text after upload. **OpenLocalASR · Complete recording** has no preview and a 60-second round limit. File SSE is not live dictation. Use a client that negotiates the shorter limit; unknown preview timing is not a live-preview promise. See [workflow semantics](recognition-contract.md).
+
+Usage separates local accepted-audio quotas from provider-reported tokens/duration. File cancellation before submission creates no cloud request; cancellation after submission may still incur upstream charges. Unknown usage is displayed explicitly rather than treated as zero.
 
 ### 1.1 Portal's position
 
@@ -68,12 +72,12 @@ Native packages include private Python; images include service runtimes, but nei
 
 ### 2.2 Windows service installation
 
-1. Run `OpenASRPortal_1.1.1_windows_amd64.msi` and authorize service installation.
+1. Run `OpenASRPortal_1.2.0_windows_amd64.msi` and authorize service installation.
 2. Open http://127.0.0.1:10087/admin. If occupied, identify the existing instance before initializing the wrong service.
 3. Complete password/upstream/client setup in §2.5.
 4. Check OpenASRPortal in Windows Services. Closing the browser does not stop it.
 
-Current-source default data is `%ProgramData%\OpenASR\Portal\data`, with `service.json` in its parent. Earlier packages use `%ProgramData%\OpenASRPortal`; see [installation lifecycle](installation.md) for migration, combined packages, and language selection. Copying Program Files alone is not a data backup.
+Default data is `%ProgramData%\OpenASR\portal\data`, with `service.json` in its parent, for standalone, combined and foreground launches. Earlier packages use `%ProgramData%\OpenASRPortal`; see [installation lifecycle](installation.md). Copying Program Files alone is not a data backup.
 
 ![Real Portal management page on Windows](images/windows-admin.png)
 
@@ -84,12 +88,12 @@ Windows 11 amd64 service extracted from 1.0.0 MSI, with temporary data/demo prof
 In the download directory, substituting ARM64 when needed:
 
 ```bash
-sudo apt install ./OpenASRPortal_1.1.1_linux_amd64.deb
+sudo apt install ./OpenASRPortal_1.2.0_linux_amd64.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
 
-Open the same /admin URL. Current-source data is `/var/lib/openasr/portal/data`; service environment is `/var/lib/openasr/portal/service.env`. Earlier `/var/lib/openasrportal` and `/etc/openasrportal/service.env` defaults migrate on installation. Daily web administration needs no sudo; an administrator restarts openasrportal after environment changes.
+Open the same /admin URL. Default data is `/var/lib/OpenASR/portal/data`; service environment is `/var/lib/OpenASR/portal/service.env`. Earlier `/var/lib/openasr/portal`, `/var/lib/openasrportal` and `/etc/openasrportal/service.env` defaults migrate on installation. Daily web administration needs no sudo; an administrator restarts openasrportal after environment changes.
 
 ![Real Portal management page on Linux](images/linux-admin.png)
 
@@ -97,7 +101,7 @@ Captured from version 1.0 source on Linux amd64, initialized with a demo LocalAS
 
 ### 2.4 Linux Docker bundle
 
-Extract `OpenASRPortal_1.1.1_linux_amd64.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
+Extract `OpenASRPortal_1.2.0_linux_amd64.tar.gz` for the appropriate architecture and enter its OpenASRPortal directory:
 
 ```bash
 docker load -i image.tar
@@ -162,7 +166,7 @@ Shows profile count, valid key count, and upstream/downstream relationships. Con
 
 - Official WS endpoint is supplied/read-only.
 - Enter the current service API key; choose an actually enabled model resource, including seedasr/bigasr duration/concurrent families.
-- Second-pass recognition defaults on; later revisions can replace initial text. Compare accuracy/finalization delay before disabling.
+- Second-pass recognition defaults off for new profiles, avoiding its upstream VAD. Existing enabled profiles retain the switch. The silence window accepts 300–5000 ms, default 5000; old out-of-range values migrate to the nearest boundary. See [Doubao settings](doubao-api-setup.md).
 - Multiple accounts use separate profiles, keys, order, and quotas.
 
 **Bailian Qwen ASR Streaming**
@@ -171,21 +175,21 @@ Shows profile count, valid key count, and upstream/downstream relationships. Con
 - Current model is read-only `qwen-audio-3.1-asr-flash-streaming`; authorize this exact model.
 - Language can be automatic or explicit when known.
 - Audio streams once over WebSocket; partials come directly from the model. Stored HTTP profiles migrate on read, preserving keys and quotas.
-- Server-side silence segmentation: 200–6000 ms, default 800. Shorter ends phrases earlier; longer tolerates pauses.
+- Server-side silence segmentation: 200–6000 ms, new default 6000. Older saved thresholds remain unchanged; increase them manually to tolerate thinking pauses. This does not fully disable upstream segmentation.
 - Preserve Dialect defaults off; enable as needed, with model-dependent results.
 
 **Boson AI · Higgs STT**
 
 - Use the official read-only WebSocket endpoint and `higgs-stt-3.1` model with a Boson API key.
-- Language is `auto` or a two-letter hint. Silence is 600–3000 ms, default 800 ms.
-- Audio uploads live; completed text arrives after a pause, at 15 seconds, or on stop. No word-by-word previews or session hotwords. Use duration quotas.
+- Language is `auto` or a two-letter hint; there is no local silence threshold.
+- All audio uploads live, including pauses; completed text arrives on stop. No local cutting, word-by-word previews or session hotwords. Use duration quotas.
 - See [Boson setup and protocol behavior](boson-api-setup.md).
 
 **Soniox · Real-time speech recognition**
 
 - Fixed `stt-rt-v6` model and official WebSocket endpoint; API key authenticates during the handshake.
-- Language `auto` or a two-letter hint; maximum endpoint delay 500–3000 ms, default 2000.
-- Real partials, semantic endpoint finals, and context hotwords. Use audio-duration quotas; Soniox bills connection duration separately. See [Soniox setup](soniox-api-setup.md).
+- Language `auto` or language hints; endpoint detection defaults off. Maximum endpoint delay (500–3000 ms, default 2000) applies only when detection is enabled.
+- Real partials, final on stop by default, and context hotwords. Use audio-duration quotas; Soniox bills connection duration separately. See [Soniox setup](soniox-api-setup.md).
 
 ### 3.5 Client keys: issue, reveal, revoke
 
@@ -269,11 +273,11 @@ Do not delete the database. Use interactive recovery on the actual data host:
 
 ```powershell
 # Administrator PowerShell, default installation
-& "$env:ProgramFiles/OpenASRPortal/python/python.exe" -B -m openasrportal.entrypoints.admin --data-dir "$env:ProgramData/OpenASR/Portal/data"
+& "$env:ProgramFiles/OpenASRPortal/python/python.exe" -B -m openasrportal.entrypoints.admin --data-dir "$env:ProgramData/OpenASR/portal/data"
 ```
 
 ```bash
-sudo -u openasrportal /usr/bin/openasrportal --data-dir /var/lib/openasr/portal/data --reset-admin-password
+sudo -u openasrportal /usr/bin/openasrportal --data-dir /var/lib/OpenASR/portal/data --reset-admin-password
 ```
 
 Source uses its own Python with `-m openasrportal.entrypoints.admin --data-dir <actual-directory>`. Recovery revokes management sessions while retaining profiles/ASR keys/business data. Never pass plaintext passwords as arguments.

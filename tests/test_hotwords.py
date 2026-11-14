@@ -13,7 +13,7 @@ from support_auth import fixture_token
 from support_auth import portal_for_tests as Portal
 from test_portal import FakeProvider
 
-from openasrportal.domain.asr_protocol import text_event
+from openasrportal.domain.transcript import ProviderEvent
 from openasrportal.domain.config import validate_config
 from openasrportal.domain.hotwords import DEFAULTS, select_terms, validate_settings
 from openasrportal.providers.bailian_asr import BailianProvider
@@ -137,7 +137,7 @@ class HotwordStoreTests(unittest.TestCase):
 class LearningProvider(FakeProvider):
     async def send_audio(self, data, last=False):
         if last:
-            raw = text_event("final_result", "麒麟 Kubernetes Kubernetes", 0, 500)
+            raw = ProviderEvent("sentence:0", 0, 2, "麒麟 Kubernetes Kubernetes", True, 0, 500)
             await self.queue.put(([raw, raw], True))
 
 
@@ -219,6 +219,7 @@ class HotwordAPITests(unittest.IsolatedAsyncioTestCase):
         ready = await socket.receive_json()
         self.assertEqual(ready["hotwords"]["appliedCount"], 1)
         await socket.receive_json()  # partial, never learned
+        await socket.send_bytes(bytes(2))
         await socket.send_json({"type": "audio.end"})
         self.assertEqual((await socket.receive_json())["type"], "transcript.final")
         self.assertEqual((await socket.receive_json())["finalCount"], 1)

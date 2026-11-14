@@ -19,6 +19,8 @@ from test_portal import FakeProvider
 from websockets.exceptions import ConnectionClosedOK
 from websockets.legacy.server import serve
 
+from openasrportal.application.meter import SessionMeter
+from openasrportal.domain.provider_usage import UsageUpdate
 from openasrportal.providers.bailian_asr import BailianProvider
 from openasrportal.storage.store import Store
 from openasrportal.storage.usage import UsageError, reported_tokens
@@ -119,6 +121,28 @@ class AccountingTests(unittest.TestCase):
         self.assertEqual(
             reported_tokens({"output": {"output": {"usage": {"total_tokens": 2}}}})["total"], 2
         )
+
+    def test_scoped_usage_deduplicates_items_and_retains_duration_and_unknown(self):
+        self.store.save("cloud", "Cloud", "openai_realtime", {"apiKey": "fictional"})
+        self.usage.update_quota("key", self.key_id, {"remainingTokens": 100})
+        self.start(profile="cloud")
+        meter = SessionMeter(self.usage, "s", {})
+        meter.begin()
+        for report in (UsageUpdate("a", "unknown", None), UsageUpdate("a", "tokens", 5, 4, 1),
+                       UsageUpdate("a", "tokens", 5), UsageUpdate("a", "tokens", 3),
+                       UsageUpdate("b", "tokens", 7, 5, 2), UsageUpdate("c", "duration", .2)):
+            meter.scoped(report)
+        with self.assertRaises(UsageError):
+            meter.scoped(UsageUpdate("d", "unknown", None), final=True)
+        quota = self.usage.quota("key", self.key_id)
+        self.assertEqual(quota["reportedTokens"], 12)
+        self.assertEqual(quota["remainingTokens"], 88)
+        self.assertTrue(quota["tokenBlocked"])
+        supplier = self.usage.statistics(1, time.time() + 1)["providerUsage"]
+        self.assertEqual(supplier, [{"kind": "duration", "scopes": 1, "total": .2},
+                                    {"kind": "tokens", "scopes": 2, "total": 12},
+                                    {"kind": "unknown", "scopes": 1, "total": None}])
+        self.assertEqual(self.usage.statistics(1, time.time() + 1, profile_id="local")["providerUsage"], [])
 
     def test_missing_token_report_blocks_token_limited_account_until_admin_changes_quota(self):
         self.store.save("cloud", "Cloud", "bailian_qwen_asr", {"apiKey": "fake-upstream"})
@@ -312,6 +336,7 @@ class UsageApiTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         ) as response:
             self.assertEqual(response.status, 200)
         socket = await self.session()
+        await socket.receive_json()  # ready precedes all audio/control input
         await socket.send_bytes(bytes(6400))
         events = await self.terminal(socket)
         self.assertEqual(events[-1]["reason"], "quota_exhausted")
@@ -347,6 +372,7 @@ class UsageApiTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         ) as response:
             self.assertEqual(response.status, 200)
         socket = await self.session()
+        await socket.receive_json()
         await socket.send_bytes(bytes(6400))
         await self.terminal(socket)
         self.assertEqual(self.store.settings()["defaultProfileId"], "next")
@@ -376,6 +402,8 @@ class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         await super().asyncSetUp()
         self.requests = []
         self.include_tokens = True
+        self.terminal_usage = True
+        self.stable_usage = True
         self.request_gate = None
         self.store.save(
             "cloud",
@@ -390,7 +418,8 @@ class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
             self.requests.append(request)
             task = request["header"]["task_id"]
             async def event(kind, payload):
-                if self.include_tokens:
+                if self.include_tokens and ((kind == "task-finished" and self.terminal_usage)
+                                            or (kind == "result-generated" and self.stable_usage)):
                     payload["usage"] = {"total_tokens": 7, "input_tokens": 5, "output_tokens": 2}
                 await ws.send(json.dumps({"header": {"event": kind, "task_id": task}, "payload": payload}))
             await event("task-started", {})
@@ -400,7 +429,7 @@ class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
                         if self.request_gate:
                             await self.request_gate.wait()
                         await event("result-generated", {"output": {"sentence": {
-                            "sentence_id": 0, "text": "测试结果。", "begin_time": 0,
+                            "sentence_id": 1, "text": "测试结果。", "begin_time": 0,
                             "end_time": 200, "sentence_end": True}}})
                         await event("task-finished", {})
             except ConnectionClosedOK:
@@ -418,6 +447,7 @@ class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_streaming_adapter_records_cumulative_tokens_and_audio_once(self):
         socket = await self.session()
+        self.assertEqual((await socket.receive_json())["type"], "session.ready")
         await socket.send_bytes(struct.pack("<h", 1500) * 3200)
         await socket.send_json({"type": "audio.end"})
         events = await self.terminal(socket)
@@ -431,6 +461,7 @@ class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
     async def test_streaming_duration_quota_finishes_and_rotates_default(self):
         self.store.usage.update_quota("profile", "cloud", {"remainingSeconds": 0.15})
         socket = await self.session()
+        self.assertEqual((await socket.receive_json())["type"], "session.ready")
         await socket.send_bytes(struct.pack("<h", 1500) * 3200)
         events = await self.terminal(socket)
         self.assertEqual(events[-1]["type"], "session.finished")
@@ -443,9 +474,26 @@ class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.settings()["defaultProfileId"], "local")
         await socket.close()
 
+    async def test_final_sentence_cumulative_usage_settles_empty_task_finished(self):
+        self.terminal_usage = False
+        for scope, identity in (("key", self.key_id), ("profile", "cloud")):
+            self.store.usage.update_quota(scope, identity, {"remainingTokens": 20})
+        socket = await self.session()
+        self.assertEqual((await socket.receive_json())["type"], "session.ready")
+        await socket.send_bytes(bytes(6400))
+        await socket.send_json({"type": "audio.end"})
+        self.assertEqual((await self.terminal(socket))[-1]["type"], "session.finished")
+        for scope, identity in (("key", self.key_id), ("profile", "cloud")):
+            quota = self.store.usage.quota(scope, identity)
+            self.assertEqual(quota["remainingTokens"], 13)
+            self.assertEqual(quota["tokenReports"], 1)
+            self.assertFalse(quota["tokenBlocked"])
+        await socket.close()
+
     async def test_streaming_silence_is_uploaded_and_metered_once(self):
         self.store.usage.update_quota("profile", "cloud", {"remainingSeconds": 1})
         socket = await self.session()
+        self.assertEqual((await socket.receive_json())["type"], "session.ready")
         await socket.send_bytes(bytes(64000))
         await socket.send_json({"type": "audio.end"})
         events = await self.terminal(socket)
@@ -462,12 +510,11 @@ class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         self.store.usage.update_quota("key", self.key_id, {"remainingTokens": 7})
         self.request_gate = asyncio.Event()
         first, second = await self.session(), await self.session()
-        for socket in (first, second):
-            await socket.send_bytes(struct.pack("<h", 1500) * 3200)
-            await socket.send_json({"type": "audio.end"})
-        deadline = time.monotonic() + 3
-        while not self.requests and time.monotonic() < deadline:
-            await asyncio.sleep(0.01)
+        self.assertEqual((await first.receive_json())["type"], "session.ready")
+        # The second session waits for the limited-account lock before ready.
+        # It must not upload before it knows whether a paid call is admitted.
+        await first.send_bytes(struct.pack("<h", 1500) * 3200)
+        await first.send_json({"type": "audio.end"})
         self.assertEqual(len(self.requests), 1)
         self.request_gate.set()
         events = await asyncio.gather(self.terminal(first), self.terminal(second))
@@ -483,6 +530,7 @@ class StreamingUsageTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         self.include_tokens = False
         self.store.usage.update_quota("key", self.key_id, {"remainingTokens": 10})
         socket = await self.session()
+        self.assertEqual((await socket.receive_json())["type"], "session.ready")
         await socket.send_bytes(struct.pack("<h", 1500) * 3200)
         await socket.send_json({"type": "audio.end"})
         events = await self.terminal(socket)

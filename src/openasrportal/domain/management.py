@@ -23,6 +23,15 @@ def contract():
             ],
         ),
         (
+            "openlocalasr_file",
+            "OpenLocalASR · 完整录音文件",
+            [
+                field("endpoint", "HTTP WAV 地址", required=True),
+                field("model", "服务端当前模型", required=True),
+                secret,
+            ],
+        ),
+        (
             "doubao_realtime",
             "豆包 · 实时语音识别",
             [
@@ -34,7 +43,10 @@ def contract():
                     "select",
                     options=[{"value": value, "label": value} for value in DOUBAO_RESOURCES],
                 ),
-                field("enableNonstream", "二遍识别", "boolean"),
+                field("enableNonstream", "二遍识别", "boolean",
+                      description="开启会启用上游静音断句；关闭时使用上游语义分句。"),
+                field("silenceMs", "断句静音（毫秒）", "number", min=300, max=5000, step=100,
+                      description="仅二遍识别生效；默认 5000 毫秒以容纳思考停顿，允许 300–5000 毫秒。"),
             ],
         ),
         (
@@ -57,7 +69,8 @@ def contract():
                     "select",
                     options=languages,
                 ),
-                field("silenceMs", "断句静音（毫秒）", "number", min=200, max=6000, step=100),
+                field("silenceMs", "断句静音（毫秒）", "number", min=200, max=6000, step=100,
+                      description="由百炼上游断句；建议 6000 毫秒以容纳思考停顿。"),
                 field("keepDialect", "保留方言表达", "boolean"),
             ],
         ),
@@ -69,8 +82,11 @@ def contract():
                 field("model", "模型", readOnly=True),
                 secret,
                 field("language", "识别语种", "select", required=True,
-                      options=[{"value": "en,zh", "label": "英文、中文"}, *languages],
-                      description="默认 en,zh（英文、中文）；auto 自动识别，或用逗号分隔两位语言代码。"),
+                      options=[{"value": "zh,en", "label": "中文为主，夹杂英文"},
+                               {"value": "en,zh", "label": "英文、中文"}, *languages],
+                      description="默认 zh,en，面向中文为主、夹杂英文；提示顺序不代表语言权重。"),
+                field("endpointDetection", "上游自动端点检测", "boolean",
+                      description="默认关闭；稳定 token 有序提交，可变尾部继续预览。开启后上游另发端点标记。"),
                 field("endpointDelayMs", "最大端点延迟（毫秒）", "number", min=500, max=3000, step=100),
             ],
         ),
@@ -83,13 +99,30 @@ def contract():
                 secret,
                 field(
                     "language", "识别语种", "select", required=True, options=languages,
-                    description="auto 自动识别，或 zh / en 等两位语言代码；停顿后返回分段文本，无逐字预览。",
+                    description="auto 自动识别，或 zh / en 等两位语言代码；完整上传，停止录音后返回文本，无逐字预览。",
                 ),
-                field("silenceMs", "断句静音（毫秒）", "number", min=600, max=3000, step=100),
             ],
         ),
     ]
     providers = []
+    for name, title, options in (
+        ("openai_file", "OpenAI · 完整录音文件", [
+            field("model", "模型", readOnly=True),
+            field("responseMode", "文件响应模式", "select", options=[
+                {"value": "json", "label": "完整结果"}, {"value": "sse", "label": "停止后逐步出字"}]),
+        ]),
+        ("openai_realtime", "OpenAI · Realtime 转写", [
+            field("model", "模型", "select", options=[
+                {"value": "gpt-live-transcribe", "label": "gpt-live-transcribe · 录音中预览"},
+                {"value": "gpt-transcribe", "label": "gpt-transcribe · 提交后转写"}]),
+            field("delay", "实时预览延迟档位", "select", options=[
+                {"value": value, "label": value or "服务默认"}
+                for value in ("", "minimal", "low", "medium", "high", "xhigh")]),
+        ]),
+    ):
+        definitions.append((name, title, [field("endpoint", "官方转写地址", readOnly=True), secret,
+                                        *options, field("languages", "预期语种（逗号分隔）"),
+                                        field("prompt", "转写背景提示（最多 4096 字符）")]))
     for provider, title, fields in definitions:
         fields.append(field("useProxy", "使用全局 Proxy 代理", "boolean"))
         defaults = config_defaults(provider)

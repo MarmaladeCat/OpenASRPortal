@@ -3,9 +3,9 @@
   <name>OpenASRPortal</name>
   <description>OpenASRPortal HTTP/WebSocket v1 speech gateway</description>
   <executable>%BASE%\python\python.exe</executable>
-  <startarguments>-B -m openasrportal.entrypoints.service run --config "%ProgramData%\OpenASRPortal\service.json"</startarguments>
+  <startarguments>-B -m openasrportal.entrypoints.service run --config "%ProgramData%\OpenASR\portal\service.json"</startarguments>
   <stopexecutable>%BASE%\python\python.exe</stopexecutable>
-  <stoparguments>-B -m openasrportal.entrypoints.service stop --config "%ProgramData%\OpenASRPortal\service.json"</stoparguments>
+  <stoparguments>-B -m openasrportal.entrypoints.service stop --config "%ProgramData%\OpenASR\portal\service.json"</stoparguments>
   <workingdirectory>%BASE%</workingdirectory>
   <env name="PYTHONUTF8" value="1" />
   <env name="PYTHONUNBUFFERED" value="1" />
@@ -20,7 +20,7 @@
   <onfailure action="restart" delay="30 sec" />
   <resetfailure>1 hour</resetfailure>
   <stoptimeout>30 sec</stoptimeout>
-  <logpath>%ProgramData%\OpenASRPortal\logs</logpath>
+  <logpath>%ProgramData%\OpenASR\portal\logs</logpath>
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>
     <keepFiles>5</keepFiles>

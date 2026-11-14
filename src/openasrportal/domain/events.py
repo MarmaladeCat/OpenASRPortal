@@ -1,6 +1,6 @@
-"""将提供商事件转成有稳定语句标识的公开 v1 事件。"""
+"""Project ordered provider results into v1's stable prefix and one preview tail."""
 
-import json
+from .transcript import TranscriptLedger
 
 
 class EventStream:
@@ -10,55 +10,47 @@ class EventStream:
         self.utterance = 1
         self.revision = 0
         self.final_count = 0
-        self.final_keys = set()
+        self.pending_text = ""
+        self.ledger = TranscriptLedger()
 
     def event(self, kind, **fields):
         self.seq += 1
         return {"type": kind, "sessionId": self.session_id, "seq": self.seq, **fields}
 
-    def transcript(self, raw):
-        kind = raw.get("type")
-        if kind not in ("partial_result", "final_result"):
-            return None
-        results = raw.get("nbest", [])
-        if isinstance(results, str):
-            results = json.loads(results)
-        if not isinstance(results, list) or not results or not isinstance(results[0], dict):
-            return None
-        result = results[0]
-        text = result.get("sentence")
-        if not isinstance(text, str):
-            return None
-        pieces = result.get("word_pieces", [])
-        starts = [
-            p["start"]
-            for p in pieces
-            if isinstance(p, dict) and type(p.get("start")) in (int, float)
-        ]
-        ends = [
-            p["end"] for p in pieces if isinstance(p, dict) and type(p.get("end")) in (int, float)
-        ]
-        start, end = min(starts, default=None), max(ends, default=None)
-        if end is None or start is None or end <= start:
-            start, end = None, None
-        final = kind == "final_result"
-        key = (start, end)
-        if start is not None and key in self.final_keys:
-            return None
+    def _text(self, items, final):
+        text = "".join(item.text for item in items)
+        starts = [item.start_ms for item in items]
+        ends = [item.end_ms for item in items]
+        start = min(starts) if starts and all(x is not None for x in starts) else None
+        end = max(ends) if ends and all(x is not None for x in ends) else None
+        if start is None or end is None or end <= start:
+            start = end = None
         self.revision += 1
         event = self.event(
             "transcript.final" if final else "transcript.partial",
-            utteranceId=f"{self.session_id}:{self.utterance}",
-            revision=self.revision,
-            text=text,
-            startMs=start,
-            endMs=end,
-            source=raw.get("source", ""),
+            utteranceId=f"{self.session_id}:{self.utterance}", revision=self.revision,
+            text=text, startMs=start, endMs=end,
+            source=items[-1].source if items else "",
         )
+        self.pending_text = "" if final else text
         if final:
-            if start is not None:
-                self.final_keys.add(key)
             self.final_count += 1
             self.utterance += 1
             self.revision = 0
         return event
+
+    def apply(self, events):
+        for event in events:
+            self.ledger.accept(event)
+        result = []
+        prefix = self.ledger.stable_prefix()
+        if prefix:
+            result.append(self._text(prefix, True))
+        tail = self.ledger.tail()
+        text = "".join(item.text for item in tail)
+        if text != self.pending_text:
+            result.append(self._text(tail, False))
+        return result
+
+    def finish(self):
+        self.ledger.finish()

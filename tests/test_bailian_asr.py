@@ -5,13 +5,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from websockets.exceptions import ConnectionClosedOK
 from websockets.legacy.server import serve
 
 from openasrportal.domain.asr_protocol import ProviderError
 from openasrportal.domain.config import BAILIAN_ASR_MODEL, BAILIAN_MODEL, validate_config
+from openasrportal.domain.events import EventStream
 from openasrportal.providers.bailian_asr import BailianProvider
 from openasrportal.storage.store import Store
 
@@ -72,11 +73,11 @@ class WireTests(unittest.IsolatedAsyncioTestCase):
                             await ws.send(self.bad)
                         else:
                             await event("result-generated", {"output": {"sentence": {
-                                "sentence_id": 0, "text": "预览", "begin_time": 0,
+                                "sentence_id": 1, "text": "预览", "begin_time": 0,
                                 "end_time": None, "sentence_end": False}}})
                     else:
                         self.commands.append(json.loads(message))
-                        sentence = {"sentence_id": 0, "text": "定稿。", "begin_time": 0,
+                        sentence = {"sentence_id": 1, "text": "定稿。", "begin_time": 0,
                                     "end_time": 200, "sentence_end": True}
                         for _ in range(2):
                             await event("result-generated", {"output": {"sentence": sentence},
@@ -101,13 +102,13 @@ class WireTests(unittest.IsolatedAsyncioTestCase):
         await self.provider.send_audio(pcm)
         events, done = await asyncio.wait_for(self.provider.receive(), 2)
         self.assertFalse(done)
-        self.assertEqual(events[0]["type"], "partial_result")
+        self.assertFalse(events[0].stable)
         await self.provider.send_audio(b"", last=True)
         finals = []
         while not done:
             events, done = await self.provider.receive()
             finals.extend(events)
-        self.assertEqual([e["nbest"][0]["sentence"] for e in finals], ["定稿。"])
+        self.assertEqual([e.text for e in finals], ["定稿。"])
         self.assertEqual(self.audio, [pcm])
         self.assertEqual([c["header"]["action"] for c in self.commands], ["run-task", "finish-task"])
         parameters = self.commands[0]["payload"]["parameters"]
@@ -126,10 +127,66 @@ class WireTests(unittest.IsolatedAsyncioTestCase):
         def message(kind, payload):
             return json.dumps({"header": {"event": kind, "task_id": self.task}, "payload": payload})
         with patch.object(self.provider.socket, "recv", side_effect=[
-            message("result-generated", {"output": {"sentence": {"heartbeat": True}}}),
+            message("result-generated", {"output": {"sentence": {"heartbeat": True, "sentence_id": 0}}}),
             message("task-finished", {}),
         ]):
             self.assertEqual(await self.provider.receive(), ([], False))
-            self.provider.ending, self.provider.pending = True, 0
+            self.provider.ending = True
+            self.provider.results.replace("pending", 0, "")
             with self.assertRaises(ProviderError):
                 await self.provider.receive()
+
+    async def test_one_based_interleaved_sentences_project_in_audio_order(self):
+        def result(identity, text, final):
+            return json.dumps({"header": {"event": "result-generated", "task_id": self.task},
+                               "payload": {"output": {"sentence": {
+                                   "sentence_id": identity, "text": text, "sentence_end": final}}}})
+        stream = EventStream("public")
+        with patch.object(self.provider.socket, "recv", side_effect=[
+            result(1, "初稿", False), result(2, "第二句。", True), result(1, "第一句。", True),
+            result(1, "第一句。", True), result(0, "非法零号", True),
+        ]):
+            first, _ = await self.provider.receive()
+            self.assertEqual(first[0].order, 0)
+            self.assertEqual(stream.apply(first)[0]["text"], "初稿")
+            second, _ = await self.provider.receive()
+            self.assertTrue(all(item["type"] == "transcript.partial" for item in stream.apply(second)))
+            final, _ = await self.provider.receive()
+            self.assertEqual([(item["type"], item["text"]) for item in stream.apply(final)],
+                             [("transcript.final", "第一句。第二句。")])
+            self.assertEqual(await self.provider.receive(), ([], False))
+            stream.finish()
+            with self.assertRaises(ProviderError):
+                await self.provider.receive()
+
+    async def test_missing_last_usage_cannot_settle_an_earlier_sentence_report(self):
+        def result(identity, usage):
+            return json.dumps({"header": {"event": "result-generated", "task_id": self.task},
+                               "payload": {"output": {"sentence": {
+                                   "sentence_id": identity, "text": "定稿。", "sentence_end": True}},
+                                   "usage": usage}})
+        callback = self.provider.usage_callback = Mock()
+        self.provider.ending = True
+        with patch.object(self.provider.socket, "recv", side_effect=[
+            result(1, {"total_tokens": 5}), result(2, None),
+            json.dumps({"header": {"event": "task-finished", "task_id": self.task}, "payload": {}}),
+        ]):
+            await self.provider.receive()
+            await self.provider.receive()
+            self.assertEqual(await self.provider.receive(), ([], True))
+        callback.assert_called_with({"usage": None}, final=True)
+
+    async def test_failure_after_stable_usage_does_not_finalize_billing(self):
+        callback = self.provider.usage_callback = Mock()
+        with patch.object(self.provider.socket, "recv", side_effect=[
+            json.dumps({"header": {"event": "result-generated", "task_id": self.task},
+                        "payload": {"output": {"sentence": {
+                            "sentence_id": 1, "text": "定稿。", "sentence_end": True}},
+                            "usage": {"total_tokens": 5}}}),
+            json.dumps({"header": {"event": "task-failed", "task_id": self.task}}),
+        ]):
+            await self.provider.receive()
+            with self.assertRaises(ProviderError):
+                await self.provider.receive()
+        self.assertEqual(callback.call_count, 1)
+        self.assertFalse(callback.call_args.kwargs["final"])

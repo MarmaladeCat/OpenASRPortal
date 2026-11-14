@@ -7,7 +7,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..domain.asr_protocol import ProviderError
-from ..domain.config import BAILIAN_MODEL
+from ..domain.provider_usage import UsageUpdate, reported_usage
+from ..domain.transcript import protocol_error
+from ..providers.registry import definition
 
 BYTES_PER_SECOND = 32000
 MAX_INTEGER = 2**63 - 1
@@ -16,7 +18,7 @@ MAX_INTEGER = 2**63 - 1
 class UsageError(ProviderError):
     def __init__(self, code, message, status=402):
         self.code, self.message, self.status = code, message, status
-        super().__init__(message)
+        super().__init__(message, code=code, retryable=False)
 
 
 def seconds_bytes(value):
@@ -40,18 +42,8 @@ def token_count(value):
 
 def reported_tokens(payload):
     """Use real upstream usage only. Never infer tokens from transcript length."""
-    if not isinstance(payload, dict):
-        return None
-    usage = None
-    current = payload
-    for _ in range(3):
-        usage = current.get("usage")
-        if isinstance(usage, dict):
-            break
-        current = current.get("output")
-        if not isinstance(current, dict):
-            break
-    if not isinstance(usage, dict):
+    usage = reported_usage(payload)
+    if not isinstance(usage, dict) or usage.get("type") == "duration":
         return None
 
     def number(*names):
@@ -72,7 +64,7 @@ def reported_tokens(payload):
 
 
 def supports_tokens(profile):
-    return profile["provider"] == BAILIAN_MODEL
+    return bool(getattr(definition(profile["provider"]).factory, "token_metered", False))
 
 
 class UsageStore:
@@ -106,6 +98,9 @@ class UsageStore:
                 "CREATE INDEX IF NOT EXISTS usage_events_key_time ON usage_events(key_id,at);"
                 "CREATE INDEX IF NOT EXISTS usage_events_profile_time ON usage_events(profile_id,at);"
                 "CREATE TABLE IF NOT EXISTS usage_metadata (name TEXT PRIMARY KEY,value TEXT NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS provider_usage (session_id TEXT NOT NULL,scope TEXT NOT NULL,"
+                "kind TEXT NOT NULL,total REAL,input_tokens INTEGER,output_tokens INTEGER,"
+                "PRIMARY KEY(session_id,scope));"
             )
             db.execute(
                 "INSERT OR IGNORE INTO usage_metadata VALUES ('startedAt',?)", (str(self.clock()),)
@@ -131,6 +126,33 @@ class UsageStore:
                 "INSERT OR IGNORE INTO usage_accounts(scope,subject_id,priority) VALUES (?,?,?)",
                 (scope, identity, priority if scope == "profile" else 0),
             )
+
+    def report_provider_usage(self, session_id, report):
+        if not isinstance(report, UsageUpdate):
+            raise protocol_error()
+        with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute("SELECT * FROM provider_usage WHERE session_id=? AND scope=?",
+                                  (session_id, report.scope)).fetchone()
+            if previous:
+                total = previous["total"]
+                if previous["kind"] == "tokens":
+                    total = int(total)
+                old = UsageUpdate(report.scope, previous["kind"], total,
+                                  previous["input_tokens"], previous["output_tokens"])
+                if report.kind == "unknown":
+                    return old
+                if old.kind != "unknown":
+                    if old.kind != report.kind:
+                        raise protocol_error()
+                    if report.total < old.total:
+                        return old
+                    report = UsageUpdate(report.scope, report.kind, report.total,
+                                         report.input if report.input is not None else old.input,
+                                         report.output if report.output is not None else old.output)
+            db.execute("INSERT OR REPLACE INTO provider_usage VALUES (?,?,?,?,?,?)",
+                       (session_id, report.scope, report.kind, report.total, report.input, report.output))
+            return report
 
     @staticmethod
     def account(db, scope, identity):
@@ -494,11 +516,20 @@ class UsageStore:
                 )
             return available, exhausted_scope
 
-    def begin_call(self, identity, *, tokens=False):
+    def begin_call(self, identity, *, tokens=False, accepted_audio=False):
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             session = self.session(db, identity)
-            self.check_account(db, "profile", session["profile_id"])
+            profile = self.account(db, "profile", session["profile_id"])
+            # A file request starts after its source samples have been debited.
+            # Exhausting the duration budget must still allow that exact recording.
+            audio_finalization = accepted_audio and profile is not None and (
+                profile["remaining_audio_bytes"] == 0 and profile["disabled_reason"] == "quota"
+                and profile["remaining_tokens"] != 0 and not profile["token_blocked"]
+                and db.execute("SELECT 1 FROM usage_events WHERE session_id=? AND upstream_audio_bytes>0",
+                               (identity,)).fetchone() is not None)
+            if not audio_finalization:
+                self.check_account(db, "profile", session["profile_id"])
             if session["key_id"]:
                 # Audio reaching its exact limit may still be finalized and billed.
                 key = self.account(db, "key", session["key_id"])
@@ -625,6 +656,17 @@ class UsageStore:
             since = float(
                 db.execute("SELECT value FROM usage_metadata WHERE name='startedAt'").fetchone()[0]
             )
+            scoped_clauses = ["s.created_at>=?", "s.created_at<?"]
+            scoped_parameters = [start, end]
+            for field, value in (("key_id", key_id), ("profile_id", profile_id)):
+                if value:
+                    scoped_clauses.append("s." + field + "=?")
+                    scoped_parameters.append(value)
+            supplier = db.execute(
+                "SELECT u.kind,COUNT(*) AS scopes,SUM(u.total) AS total FROM provider_usage u "
+                "JOIN usage_sessions s ON s.id=u.session_id WHERE " + " AND ".join(scoped_clauses)
+                + " GROUP BY u.kind ORDER BY u.kind", scoped_parameters,
+            ).fetchall()
         total, timeline, keys, profiles = self.empty_total(), {}, {}, {}
         for row in rows:
             moment = datetime.fromtimestamp(row["minute"], zone)
@@ -651,6 +693,11 @@ class UsageStore:
             "resolutionSeconds": 60,
             "trackingStartedAt": since,
             "total": self.public_total(total),
+            "providerUsage": [
+                {"kind": row["kind"], "scopes": row["scopes"],
+                 "total": int(row["total"]) if row["kind"] == "tokens" else row["total"]}
+                for row in supplier
+            ],
             "timeline": [
                 {"start": stamp, **self.public_total(value)}
                 for stamp, value in sorted(timeline.items())

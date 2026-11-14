@@ -2,7 +2,7 @@
 
 [English](installation.md) | **简体中文**
 
-本页行为适用于 Portal 1.1.1 及 Input 1.1.1 + Portal 1.1.1 合体安装包。
+本页行为适用于 Portal 1.2.0 及 Input 1.2.0 + Portal 1.2.0 合体安装包。
 
 ## 配合 Input 安装
 
@@ -12,9 +12,9 @@
 
 ## 目录与生命周期
 
-Windows 服务配置在 `%ProgramData%\OpenASR\Portal\service.json`，默认数据在其 `data\` 子目录；Linux 使用 `/var/lib/openasr/portal/service.env` 和 `/var/lib/openasr/portal/data/`。Input 位于同根下的 `Input/<SID>` 或 `input/<uid>`，具有用户私有权限。只有 Portal 打开自身数据库。
+Windows 服务配置在 `%ProgramData%\OpenASR\portal\service.json`，默认数据在其 `data\` 子目录；Linux 使用 `/var/lib/OpenASR/portal/service.env` 和 `/var/lib/OpenASR/portal/data/`。独立版、合体版、前台及源码启动采用相同默认数据位置。`OPENASR_DATA_ROOT` 可迁移公共命名空间；`OPENASRPORTAL_DATA` 或 `--data-dir` 显式覆盖本产品数据库目录。Input 使用同根下的 `input/<SID或UID>`。只有 Portal 打开自身数据库。
 
-升级时，旧默认 `%ProgramData%\OpenASRPortal`、`/etc/openasrportal/service.env`、`/var/lib/openasrportal` 在停止 Portal 后迁移。已配置的自定义数据目录保留。确认新安装正常前保留旧备份。Docker 卷和源码运行的 `--data-dir` 仍由部署者明确指定。
+升级时，旧默认 `%ProgramData%\OpenASRPortal`、`/var/lib/openasr/portal`、`/etc/openasrportal/service.env` 和 `/var/lib/openasrportal` 在停服后迁移，自定义路径保留。验证前保留旧备份。Compose 默认绑定标准宿主数据目录；旧命名卷需继续显式挂载，或停服后复制完整数据。旧源码/XDG 部署须先停服，将旧数据目录（含密钥保险库）完整复制到新的 `portal/data` 再启动；不得合并或覆盖已有目标。
 
 Linux 安装会在 `/etc/systemd/system/openasrportal.service.d/20-data-directory.conf` 中，仅为配置的数据目录添加 systemd 沙箱例外。之后修改 `OPENASRPORTAL_DATA` 时，请停止服务并运行 `sudo dpkg-reconfigure openasrportal` 更新该例外。已有自定义数据文件应继续允许 `openasrportal` 服务账号访问。
 
@@ -23,6 +23,16 @@ Linux 安装会在 `/etc/systemd/system/openasrportal.service.d/20-data-director
 Windows 首次交互安装或 Linux 配置入口在实时认证状态表明尚无管理员时打开 `/admin/setup`。设置至少 12 字符的密码后添加上游。升级及保留配置后的重装复用管理员、客户端 Key、识别档案、热词和配额；没有完成的首次设置会继续引导。Windows 可用 `OPENASRPORTAL_NO_LAUNCH=1` 或 `/qn` 禁止自动打开，Linux 配置入口使用 `--no-open`。无图形界面时手动访问本机实际管理地址；独立 Linux 包会打印该地址，并在能识别 sudo 发起用户的图形会话时尝试打开初始化页面。
 
 默认卸载保留配置。Windows 明确删除数据时也会清理识别出的旧默认备份；Linux 删除数据是独立的管理员操作。删除前备份实际数据目录，至少包含 `portal.db` 和 `asr-key-vault.key`。
+
+### 清理旧 Portal 目录
+
+核对新服务实际使用的 `service.json` / `service.env` 和数据路径、确认档案/Key/热词完整，并停止旧服务后，可删除这些旧默认位置：Windows `%ProgramData%\OpenASRPortal`；Linux `/var/lib/openasr/portal`、`/etc/openasrportal/service.env`、`/var/lib/openasrportal`。`/etc/openasrportal` 的其他文件须核对内容及服务引用后再删。若命令、服务配置或挂载仍选用显式自定义路径、旧源码/XDG 目录或 Docker 卷，它们仍是当前数据。
+
+全新安装验收应在首次启动前保证新数据根和旧默认位置均为空；保留旧默认目录可能触发迁移。当前 `/var/lib/OpenASR/portal` 与 `%ProgramData%\OpenASR\portal` 包含有效数据。数据库与保险库密钥须成套保留；只清理 Portal 时不能删除整个 OpenASR 公共根。
+
+## Linux 显式删除数据
+
+停止并卸载 Portal 后，remove 和 purge 均保留数据。仅删除 Portal：`sudo rm -rf -- /var/lib/OpenASR/portal`，会清除其配置、凭据、热词和用量。旧副本、自定义路径及旧 Docker 卷单独检查。公共根目录还包含其他产品，只卸载 Portal 时不要删除整个根目录。
 
 ## 界面语言
 

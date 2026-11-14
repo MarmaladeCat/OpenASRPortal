@@ -5,33 +5,15 @@ import argparse
 import asyncio
 import json
 import sys
-import time
 
 from websockets.exceptions import ConnectionClosed
 from websockets.legacy.server import serve
 
 from ..domain.asr_protocol import ProviderError, describe_error
-from ..domain.config import (
-    BAILIAN_MODEL,
-    BOSON_MODEL,
-    DOUBAO_MODEL,
-    LOCAL_ASR_MODEL,
-    SONIOX_MODEL,
-    validate_config,
-)
-from .bailian_asr import BailianProvider
-from .boson_asr import BosonProvider
-from .dashscope_asr import DashScopeProvider
-from .doubao_asr import DoubaoProvider
-from .soniox_asr import SonioxProvider
-
-PROVIDERS = {
-    SONIOX_MODEL: SonioxProvider,
-    BOSON_MODEL: BosonProvider,
-    DOUBAO_MODEL: DoubaoProvider,
-    BAILIAN_MODEL: BailianProvider,
-    LOCAL_ASR_MODEL: DashScopeProvider,
-}
+from ..domain.config import validate_config
+from ..domain.events import EventStream
+from .probe import test_connection
+from .registry import PROVIDERS
 
 
 async def bridge(client, provider):
@@ -61,20 +43,29 @@ async def bridge(client, provider):
                         raise ProviderError("音频必须为 16 kHz 单声道 PCM16")
                     pending.extend(message)
                     while len(pending) >= 6400:
-                        await provider.send_audio(bytes(pending[:6400]))
+                        await provider.write_audio(bytes(pending[:6400]))
                         del pending[:6400]
                 elif json.loads(message).get("signal") == "end":
-                    await provider.send_audio(bytes(pending), last=True)
+                    if pending:
+                        await provider.write_audio(bytes(pending))
+                    await provider.finish_input()
                     ended.set()
                     return
             raise ConnectionError("client disconnected")
 
         async def download():
+            stream = EventStream("legacy")
             while True:
                 events, last = await provider.receive()
-                for event in events:
-                    await client.send(json.dumps(event, ensure_ascii=False))
+                for event in stream.apply(events):
+                    await client.send(json.dumps({
+                        "type": "final_result" if event["type"] == "transcript.final" else "partial_result",
+                        "source": event["source"], "nbest": [{"sentence": event["text"], "word_pieces": [
+                            {"word": event["text"], "start": event["startMs"], "end": event["endMs"]}]}],
+                    }, ensure_ascii=False))
                 if last:
+                    stream.finish()
+                    await asyncio.wait_for(ended.wait(), 75)
                     await client.send(json.dumps({"type": "speech_end"}))
                     return
 
@@ -111,30 +102,6 @@ async def bridge(client, provider):
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        await provider.close()
-
-
-async def test_connection(provider):
-    started = time.monotonic()
-    try:
-        await provider.open()
-        if hasattr(provider, "probe"):
-            await provider.probe()
-            return {"ok": True, "latencyMs": round((time.monotonic() - started) * 1000)}
-        # 初始化及短静音请求都通过才算成功，不只检查 HTTP 握手。
-        await provider.send_audio(bytes(6400), last=True)
-
-        async def drain():
-            while True:
-                _, last = await provider.receive()
-                if last:
-                    return
-
-        await asyncio.wait_for(drain(), 5)
-        return {"ok": True, "latencyMs": round((time.monotonic() - started) * 1000)}
-    except Exception as error:
-        return {"ok": False, "error": describe_error(error, getattr(provider, "label", "远程 ASR"))}
-    finally:
         await provider.close()
 
 

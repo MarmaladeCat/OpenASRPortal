@@ -45,7 +45,7 @@ id is immutable, up to 100 characters, allowing letters/digits/underscore/hyphen
 
 ## Descriptive contract
 
-Provider `boson_realtime` exposes `apiKey`, fixed `endpoint` (`wss://api.boson.ai/v1/realtime`), fixed `model` (`higgs-stt-3.1`), `language` (`auto` or two lowercase letters), and integer `silenceMs` (600–3000, default 800). It supports duration quotas, not token quotas or session hotwords. See [setup](boson-api-setup.md).
+Provider `boson_realtime` exposes `apiKey`, fixed `endpoint` (`wss://api.boson.ai/v1/realtime`), fixed `model` (`higgs-stt-3.1`), and `language` (`auto` or two lowercase letters). Legacy `silenceMs` is removed; full audio commits at recording end. It supports duration quotas, not token quotas or session hotwords. See [setup](boson-api-setup.md).
 
 GET contract returns:
 
@@ -173,19 +173,27 @@ Sources include [THUOCL](https://github.com/thunlp/THUOCL), [Rime Ice](https://g
 
 ## Usage and quotas
 
-`bailian_qwen_asr` uses `qwen-audio-3.1-asr-flash-streaming`, official WSS `/api-ws/v1/inference`, `language`, `keepDialect`, and server-side `silenceMs` (200–6000, default 800). The preview-interval field is removed. Stored HTTP settings migrate on read/save, preserving credentials and quotas. `soniox_realtime` exposes a key, fixed endpoint/model (`stt-rt-v6`), `language` (`auto` or a two-letter hint), and `endpointDelayMs` (500–3000, default 2000). See [Bailian setup](bailian-api-setup.md) and [Soniox setup](soniox-api-setup.md).
+`openai_file` and `openai_realtime` are separate profile types with official fixed endpoints. The file profile selects JSON or SSE; Realtime selects live-preview or commit-triggered transcription. Both accept a context prompt and language hints. See [OpenAI setup](openai-api-setup.md). `openlocalasr_file` is an independent 60-second complete-recording profile. Admin/client profiles expose `capabilities.recognition` and `capabilities.limits`; panels show preview timing, stability unit and recording limit. Definitions are in the [recognition contract](recognition-contract.md).
+
+`bailian_qwen_asr` uses `qwen-audio-3.1-asr-flash-streaming`, official WSS `/api-ws/v1/inference`, `language`, `keepDialect`, and server-side `silenceMs` (200–6000, new default 6000; saved values retained). The preview-interval field is removed. Stored HTTP settings migrate on read/save, preserving credentials and quotas. `soniox_realtime` exposes a key, fixed endpoint/model (`stt-rt-v6`), `language`, `endpointDetection` (boolean, default false), and `endpointDelayMs` (500–3000, default 2000; applied only with endpoint detection). See [Bailian setup](bailian-api-setup.md) and [Soniox setup](soniox-api-setup.md).
+
+Doubao new profiles default `enableNonstream` to false. `silenceMs` accepts integer 300–5000, default 5000; it is sent as `end_window_size` only with second-pass enabled. Existing switches and valid values are retained. Stored 200–299 / 5001–6000 values migrate to 300 / 5000 on read and persist on save; new out-of-range patches fail validation. Bailian's independent 200–6000 range is unchanged. See [Doubao configuration](doubao-api-setup.md).
 
 PATCH `/v1/admin/asr-keys/{id}/quota` or `/v1/admin/profiles/{id}/quota` accepts `{"remainingSeconds":900,"remainingTokens":null}`; upstreams also accept enabled. Values are replacement balances, not increments. null means unlimited, 0 exhausted, omitted unchanged; cumulative totals persist. Either exhausted dimension blocks future calls.
 
 Admin quota contains remainingSeconds, remainingTokens, reservedSeconds, availableSeconds, usedSeconds, reportedTokens, tokens, requests, tokenReports, unreportedRequests, enabled, disabledReason, tokenBlocked, exhausted, priority. Without token reports, tokens is null, not 0.
 
-`GET /v1/admin/usage` accepts from/to (Unix seconds or ISO 8601), bucket=hour/day/month, keyId, profileId, timezone (IANA, e.g. Asia/Shanghai). Defaults: last seven days, UTC. Returns total/timeline/keys/profiles/trackingStartedAt/resolutionSeconds. Ordinary `/v1/profiles` shows availability, not balances/totals.
+`GET /v1/admin/usage` accepts from/to (Unix seconds or ISO 8601), bucket=hour/day/month, keyId, profileId, timezone (IANA, e.g. Asia/Shanghai). Defaults: last seven days, UTC. Returns total/timeline/keys/profiles/trackingStartedAt/resolutionSeconds and `providerUsage`. Ordinary `/v1/profiles` shows availability, not balances/totals.
 
-Duration meters submitted PCM at 32000 bytes/second, not connection wait. Debit complete samples atomically; truncate at balance boundaries and finalize normally. Unconnected/expired tickets consume no audio; failure/cancellation retain actual usage. Upstream audio counts once. Soniox cloud billing uses stream duration including idle time and therefore differs from local audio quotas. Legacy reservation columns remain only for database compatibility and restart recovery.
+`providerUsage` is a list of `{kind,scopes,total}` grouped by `tokens`, `duration` (seconds), or `unknown` (`total:null`). It aggregates the latest cumulative report per session/request or item scope, using session creation time in the returned from/to range and the same keyId/profileId filters. It has no timeline buckets and is distinct from minute-compressed local audio history. Unknown reports can become known; repeats/stale totals never double-charge. The UI shows provider-reported duration and unknown-scope counts. Duration is never converted to tokens, and an absent report is not a zero charge.
+
+Local duration meters accepted source PCM at 32000 bytes/second, not connection wait or resampled output. Debit complete samples atomically; truncate at balance boundaries and finalize normally. Unconnected/expired tickets consume no audio; failure/cancellation retain accepted usage. Upstream audio counts once. File profiles start the request count at submission: zero-sample end and cancellation before end make no request and do not block token quotas for missing usage. A recording that exhausts its duration balance can still submit its already-accepted audio once. Soniox cloud billing uses stream duration including idle time and therefore differs from local audio quotas. Legacy reservation columns remain only for database compatibility and restart recovery.
 
 Admin tests meter upstream only; unsaved drafts use `draft:provider:id`. Audio history is minute-compressed; queries expand to full minutes while debit remains sample-based. Portal is not a provider billing/cloud-balance service.
 
 Tokens use actual upstream usage total_tokens or input_tokens/output_tokens, prompt_tokens/completion_tokens, never text length. Bailian reports cumulative task usage: only increases are debited, duplicate/stale totals do not double-charge, and each task counts as one request/report. Missing reports display unreported; known partial totals remain visible if a task is interrupted. Doubao, LocalASR, Boson and Soniox lack billable token reports and reject token-limited selection. Missing final Bailian usage under a token limit sets tokenBlocked and stops future calls, even if earlier partial usage was reported.
+
+OpenAI usage is scoped to the file request or Realtime item/content. Known token scopes are summed once; mixed duration/unknown scopes retain known token charges but cannot settle a token-limited call successfully. Missing final required token usage sets `tokenBlocked`, including interrupted paid requests. Clearing a local limit does not change provider billing.
 
 Tokens settle at completion, so the task may exceed remaining balance: all actual usage is recorded, balance becomes zero. Streaming admission is serialized within token-limited scopes until cleanup, including errors/cancellation. Lowering a balance cannot undo executed work. Remove token limits/use duration, or confirm restored upstream reporting and reset budget to clear the pause.
 

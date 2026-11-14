@@ -33,7 +33,7 @@ async function run() {
   await app.whenReady();
   server = spawn(
     process.env.OPENASRPORTAL_TEST_PYTHON || 'python3',
-    ['tests/serve_management_ui.py'],
+    ['tests/serve_management_ui.py', '--usage-fixture'],
     {
       cwd: root,
       env: { ...process.env, PYTHONPATH: path.join(root, 'src'), PYTHONDONTWRITEBYTECODE: '1' }
@@ -96,17 +96,36 @@ async function run() {
   // Observe actual requests, while still sending them to the real management API.
   await js(`window.profileWrites=[];window.profileProbes=[];
     const originalFetch=window.fetch;
-    window.fetch=(url, options)=>{
+    window.fetch=async (url, options)=>{
       if (url.endsWith('/test')) window.profileProbes.push(options.body);
       else if (url.includes('/profiles') && options?.body)
         window.profileWrites.push(JSON.parse(options.body));
-      return originalFetch(url, options);
+      const response=await originalFetch(url, options);
+      if (window.holdNextKeyRead && url === '/v1/admin/asr-keys' && options.method === 'GET') {
+        window.holdNextKeyRead=false;
+        await new Promise(resolve=>{window.releaseKeyRead=resolve;});
+      }
+      return response;
     };undefined;`);
   for (const [id, key] of [
     ['doubao-1', 'key-1'],
     ['doubao-2', 'key-2']
   ]) {
     await newDoubao();
+    const silence = 'document.querySelector("#fields [name=silenceMs]")';
+    assert.deepEqual(await js(`[${silence}.min, ${silence}.max, ${silence}.value]`),
+      ['300', '5000', '5000']);
+    await js(`${silence}.value='6000'`);
+    assert.equal(await js(`${silence}.validity.rangeOverflow`), true);
+    await js(`${silence}.value='200'`);
+    assert.equal(await js(`${silence}.validity.rangeUnderflow`), true);
+    await js(`${silence}.value='1200'`);
+    await require('./language_ui.cjs').language(window, 'en');
+    assert.ok(await js('document.getElementById("fields").textContent.includes("within 300–5000 ms")'));
+    assert.equal(await js(`${silence}.value`), '1200');
+    await require('./language_ui.cjs').language(window, 'zh-CN');
+    assert.ok(await js('document.getElementById("fields").textContent.includes("允许 300–5000 毫秒")'));
+    await js(`${silence}.value='5000'`);
     assert.equal(await js('document.querySelector("#fields [name=useProxy]").checked'), false);
     if (id === 'doubao-1')
       await js('document.querySelector("#fields [name=useProxy]").checked = true');
@@ -139,17 +158,31 @@ async function run() {
   ]);
   assert.equal(endpoints[0], endpoints[1]);
   const firstCard = 'document.querySelector(\'#profiles article[data-id="doubao-1"]\')';
-  await js(`${firstCard}.querySelector('.actions input[role=switch]').click();`);
+  await js(`window.quotaToggle=${firstCard}.querySelector('.actions input[role=switch]');
+    window.quotaToggle.click();`);
   await wait(`${firstCard}.querySelector('h3').textContent.includes('手动停用')`);
+  await wait('!window.quotaToggle.disabled');
   assert.equal(await js(`${firstCard}.querySelector('.actions input[role=switch]').checked`), false);
-  await js(`${firstCard}.querySelector('.actions input[role=switch]').click();`);
+  // Let the new card be usable while the toggle's unrelated key refresh is pending.
+  // A late toggle completion must not erase the newer probe result.
+  await js(`window.holdNextKeyRead=true;
+    window.quotaToggle=${firstCard}.querySelector('.actions input[role=switch]');
+    window.quotaToggle.click();`);
   await wait(`${firstCard}.querySelector('h3').textContent.includes('启用')`);
+  await wait('typeof window.releaseKeyRead === "function"');
   assert.equal(await js(`${firstCard}.querySelector('[name=endpoint]').readOnly`), true);
   assert.equal(await js(`${firstCard}.querySelector('[name=useProxy]').disabled`), true);
   await js(`${firstCard}.querySelector('.profile-edit').click();
     ${firstCard}.querySelector('[name=useProxy]').click();
     [...${firstCard}.querySelectorAll('button')].find(button=>button.textContent==='测试上游连接').click();`);
   await wait(`${firstCard}.querySelector('.probe-result').dataset.state === 'success'`);
+  await js('window.releaseKeyRead();');
+  await wait('!window.quotaToggle.disabled');
+  assert.equal(
+    await js(`${firstCard}.querySelector('.probe-result').dataset.state`),
+    'success',
+    'Finishing an older quota refresh must retain the newer probe feedback'
+  );
   assert.equal(await js('JSON.parse(window.profileProbes.at(-1)).configuration.useProxy'), false);
   assert.ok(
     await js(`${firstCard}.querySelector('.probe-result').textContent.includes('直接连接')`)
@@ -196,6 +229,8 @@ async function run() {
     document.getElementById('provider').dispatchEvent(new Event('change'));`);
   assert.equal(await js(`${secret}.value`), '');
   assert.equal(await js(`${secret}.required`), true);
+  assert.deepEqual(await js(`(()=>{const field=document.querySelector('#fields [name=silenceMs]');
+    return [field.min, field.max, field.value];})()`), ['200', '6000', '6000']);
   assert.equal(
     await js('document.querySelector("#fields input[name=model]").value'),
     'qwen-audio-3.1-asr-flash-streaming'
@@ -240,7 +275,7 @@ async function run() {
     document.getElementById('provider').value='soniox_realtime';
     document.getElementById('provider').dispatchEvent(new Event('change'));`);
   assert.equal(await js('document.querySelector("#fields input[name=model]").value'), 'stt-rt-v6');
-  assert.equal(await js('document.querySelector("#fields [name=language]").value'), 'en,zh');
+  assert.equal(await js('document.querySelector("#fields [name=language]").value'), 'zh,en');
   assert.equal(await js(`${secret}.value`), '');
   await js(`document.getElementById('profile-id').value='soniox-1';
     document.getElementById('profile-title').value='Soniox 测试';
@@ -255,6 +290,50 @@ async function run() {
   await js(`document.getElementById('form').requestSubmit();`);
   await wait(`document.querySelector('#profiles article[data-id="soniox-1"]') !== null`);
   assert.equal(await js('window.profileWrites.at(-1).provider'), 'soniox_realtime');
+  for (const [provider, id, mode, expected] of [
+    ['openai_file', 'file-json', 'json', 'Recognition after stopping'],
+    ['openai_file', 'file-sse', 'sse', 'Incremental text after stopping'],
+    ['openai_realtime', 'live', 'gpt-live-transcribe', 'Preview during recording'],
+    ['openai_realtime', 'commit', 'gpt-transcribe', 'Incremental text after commit']
+  ]) {
+    await js(`document.getElementById('new').click();
+      document.getElementById('provider').value=${JSON.stringify(provider)};
+      document.getElementById('provider').dispatchEvent(new Event('change'));
+      document.getElementById('profile-id').value=${JSON.stringify(id)};
+      document.getElementById('profile-title').value='用户提示🙂';
+      ${secret}.value='fictional-openai-key';
+      document.querySelector('#fields [name=languages]').value='zh,en';
+      document.querySelector('#fields [name=prompt]').value='保留用户内容🙂';
+      document.querySelector('#fields [name=${provider === 'openai_file' ? 'responseMode' : 'model'}]').value=${JSON.stringify(mode)};`);
+    assert.equal(await js('document.querySelector("#fields [name=endpoint]").readOnly'), true);
+    await require('./language_ui.cjs').language(window, 'zh-CN');
+    await require('./language_ui.cjs').language(window, 'en');
+    assert.equal(await js('document.querySelector("#fields [name=prompt]").value'), '保留用户内容🙂');
+    assert.equal(await js(`${secret}.value`), 'fictional-openai-key');
+    if (id === 'commit') {
+      await js(`document.querySelector('#fields [name=delay]').value='low';
+        document.getElementById('form').requestSubmit();`);
+      await wait(`document.getElementById('status').textContent.includes('Delay settings apply only')`);
+      await js(`document.querySelector('#fields [name=delay]').value='';`);
+    }
+    await js(`document.getElementById('form').requestSubmit();`);
+    const card = `document.querySelector('#profiles article[data-id="${id}"]')`;
+    await wait(`${card} !== null`);
+    await wait(`${card}.querySelector('.recognition-capability').textContent.includes(${JSON.stringify(expected)})`);
+    assert.ok(await js(`${card}.querySelector('.recognition-capability').textContent.includes('Recording limit: 300 s')`));
+    await js(`${card}.querySelector('.profile-edit').click();`);
+    assert.equal(await js(`${inlineSecret}.value`), '');
+    await js(`${editing}.requestSubmit();`);
+    await wait('document.querySelector("#profiles .editing") === null');
+    assert.equal(await js('window.profileWrites.at(-1).configuration.apiKey'), undefined);
+  }
+  await js(`document.getElementById('tab-usage').click();`);
+  await wait(`document.getElementById('usage-summary').textContent.includes('Provider-reported duration')`);
+  assert.ok(await js(`document.getElementById('usage-summary').textContent.includes('12.5')`));
+  assert.ok(await js(`document.getElementById('usage-summary').textContent.includes('Scopes with unknown usage')`));
+  await require('./language_ui.cjs').language(window, 'zh-CN');
+  assert.ok(await js(`document.getElementById('usage-summary').textContent.includes('用量未知作用域')`));
+  await js(`document.getElementById('tab-upstream').click();`);
   await require('./language_ui.cjs').language(window, 'zh-CN');
   window.setContentSize(1180, 900);
   assert.ok(

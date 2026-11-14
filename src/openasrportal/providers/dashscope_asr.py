@@ -6,11 +6,13 @@ import uuid
 
 from websockets.exceptions import InvalidStatusCode
 
-from ..domain.asr_protocol import ProviderError, text_event
+from ..domain.asr_protocol import ProviderError
+from ..domain.transcript import ResultEmitter, protocol_error
+from .base import StreamingProvider
 from .transport import connect
 
 
-class DashScopeProvider:
+class DashScopeProvider(StreamingProvider):
     label = "OpenLocalASR"
     text_processing = "native"
     finish_timeout = 60
@@ -19,8 +21,8 @@ class DashScopeProvider:
         self.config = config
         self.socket = None
         self.task_id = str(uuid.uuid4())
-        self.finalized = set()
-        self.pending = False
+        self.results = ResultEmitter()
+        self.ending = False
 
     def command(self, action, payload):
         return json.dumps(
@@ -42,7 +44,7 @@ class DashScopeProvider:
                     "OpenLocalASR 任务失败，请检查服务模型是否就绪、模型名和音频参数"
                 )
             return header.get("event"), message.get("payload", {})
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, AttributeError):
             raise ProviderError("OpenLocalASR 返回了无效的 DashScope 任务事件") from None
 
     async def open(self):
@@ -58,9 +60,7 @@ class DashScopeProvider:
                 max_size=4 * 1024 * 1024,
             )
         except InvalidStatusCode as error:
-            raise ProviderError(
-                "OpenLocalASR 连接失败（HTTP %d），请检查地址和 API Key" % error.status_code
-            ) from None
+            raise ProviderError.upstream("OpenLocalASR", error.status_code) from None
         await self.socket.send(
             self.command(
                 "run-task",
@@ -79,41 +79,37 @@ class DashScopeProvider:
             raise ProviderError("OpenLocalASR 未确认任务启动")
 
     async def send_audio(self, pcm, last=False):
+        if self.ending:
+            raise ProviderError("OpenLocalASR 音频已经结束")
         if pcm:
             await self.socket.send(pcm)
         if last:
+            self.ending = True
             await self.socket.send(self.command("finish-task", {"input": {}}))
 
     async def receive(self):
         kind, payload = self.parse(await self.socket.recv())
         if kind == "task-finished":
-            if self.pending:
+            if not self.ending:
                 raise ProviderError("OpenLocalASR 未返回最终分句，文字已保留供核对")
+            self.results.finish()
             return [], True
         if kind != "result-generated":
             return [], False
-        sentence = payload.get("output", {}).get("sentence", {})
-        if sentence.get("heartbeat"):
-            return [], False
-        text = sentence.get("text")
-        if not isinstance(text, str):
-            raise ProviderError("OpenLocalASR 结果缺少文本")
-        identity = sentence.get("sentence_id", sentence.get("begin_time"))
-        if identity in self.finalized:
-            return [], False
-        final = sentence.get("sentence_end") is True
-        self.pending = bool(text) and not final
-        if final:
-            self.finalized.add(identity)
-        return [
-            text_event(
-                "final_result" if final else "partial_result",
-                text,
-                sentence.get("begin_time") or 0,
-                sentence.get("end_time") or 0,
-                "dashscope",
-            )
-        ], False
+        try:
+            sentence = payload["output"]["sentence"]
+            if sentence.get("heartbeat"):
+                return [], False
+            identity, final = sentence["sentence_id"], sentence["sentence_end"]
+            # The public OpenLocalASR protocol numbers sentences from one.
+            if type(identity) is not int or identity < 1 or type(final) is not bool:
+                raise ValueError()
+            return self.results.replace(
+                f"{self.task_id}:{identity}", identity - 1, sentence["text"], stable=final,
+                start=sentence.get("begin_time"), end=sentence.get("end_time"), source="dashscope",
+            ), False
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise protocol_error() from None
 
     async def close(self):
         if self.socket:

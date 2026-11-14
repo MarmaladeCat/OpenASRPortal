@@ -2,7 +2,7 @@
 
 **English** | [简体中文](bailian-api-setup.zh-CN.md)
 
-Create an Alibaba Cloud Model Studio (Bailian) workspace, authorize **`qwen-audio-3.1-asr-flash-streaming`**, and create an API key bound to that workspace for an upstream profile in OpenASRPortal **1.1.1**.
+Create an Alibaba Cloud Model Studio (Bailian) workspace, authorize **`qwen-audio-3.1-asr-flash-streaming`**, and create an API key bound to that workspace for an upstream profile in OpenASRPortal **1.2.0**.
 
 ## 1. Sign in to Model Studio
 
@@ -49,7 +49,7 @@ The key must **belong to the workspace whose model access you authorized**. If y
 | Model | Keep the read-only `qwen-audio-3.1-asr-flash-streaming` |
 | Recognition language | `auto` for automatic recognition including Chinese and English; select a single supported language only when needed |
 | Preserve dialect | Off initially; enable only if you want the provider's dialect-preservation behavior |
-| Segmentation silence | 800 ms initially; supported range 200–6000 ms |
+| Segmentation silence | New profiles: 6000 ms; supported range 200–6000 ms |
 | Use proxy | Off for direct access; enable only with a configured global HTTP/HTTPS proxy |
 
 Obtain the **Workspace ID** from this workspace's connection information in Model Studio. For Beijing, enter:
@@ -81,11 +81,11 @@ Save the profile, leave **Enabled** on, and set it as default or choose it expli
 
 ## Billing and troubleshooting
 
-Portal sends `run-task`, waits for `task-started`, streams raw 16 kHz mono PCM16 once, and forwards upstream partial/final sentences. Ending sends `finish-task` and waits for `task-finished`. Server-side silence segmentation accepts 200–6000 ms (default 800). There is no local VAD, repeated HTTP recognition, preview interval, or HTTP fallback.
+Portal sends `run-task`, waits for `task-started`, streams all raw 16 kHz mono PCM16 once, including silence, and forwards upstream partial/final sentences. Ending sends `finish-task` and waits for `task-finished`. Server-side silence segmentation accepts 200–6000 ms; new profiles default to 6000 to accommodate thinking pauses. Existing saved thresholds remain unchanged: edit an older 800 ms profile manually. This upstream setting cannot disable segmentation entirely. There is no local VAD, repeated HTTP recognition, preview interval, or HTTP fallback.
 
 Existing stored HTTP profiles are read as streaming profiles: the model and protocol/path migrate, the region, workspace, key, silence setting, profile ID and quota remain. Saving persists the upgraded settings. Grant the streaming model permission before use; migration cannot grant cloud permissions.
 
-- **Billing:** use current Model Studio pricing. Portal counts audio once and one request per task; cumulative token reports debit only their increase. The final task report settles the total. Token-limited streams sharing an account are serialized. Missing final usage blocks token-limited accounts until the budget is reset or token limits are removed; cancellation retains known usage. Final settlement may exceed the remaining budget.
+- **Billing:** use current Model Studio pricing. Portal counts audio once and one request per task; cumulative token reports debit only their increase. Normal task completion settles the terminal usage, or the last stable sentence's cumulative usage when the terminal event omits it. A missing last report, cancellation or failure does not turn an earlier partial report into a complete bill. Token-limited streams sharing an account are serialized. Missing final usage blocks token-limited accounts until the budget is reset or token limits are removed; cancellation retains known usage. Final settlement may exceed the remaining budget.
 - **Model authorization error:** return to the new workspace and confirm that model invocation is **Authorized**, then verify that the key belongs to this workspace.
 - **Invalid key:** check that you copied the complete Model Studio API key, selected the correct region, and omitted any `Bearer` prefix.
 - **The endpoint cannot be saved or requests fail:** check the Workspace ID, region, WSS scheme and `/api-ws/v1/inference` path. Use the workspace endpoint matching the key.

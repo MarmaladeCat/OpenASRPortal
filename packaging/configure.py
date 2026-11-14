@@ -50,7 +50,22 @@ def configure_data_access(root, value):
 
 
 def configure(root, previous_version=""):
-    directory = root / "var/lib/openasr/portal"
+    directory = root / "var/lib/OpenASR/portal"
+    for parent in (directory.parent, directory):
+        if parent.is_symlink():
+            raise ValueError("Portal installation paths must not be symlinks")
+    previous = root / "var/lib/openasr/portal"
+    if not (directory / "service.env").exists() and previous.is_dir():
+        if previous.is_symlink() or any(p.is_symlink() for p in previous.rglob("*")):
+            raise ValueError("Legacy Portal state must not contain symlinks")
+        directory.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        with tempfile.TemporaryDirectory(prefix=".portal-migrating-", dir=directory.parent) as temp:
+            staged = Path(temp) / "portal"
+            shutil.copytree(previous, staged)
+            directory.mkdir(exist_ok=True, mode=0o700)
+            for entry in sorted(staged.iterdir(), key=lambda p: p.name == "service.env"):
+                if not (directory / entry.name).exists():
+                    entry.rename(directory / entry.name)
     legacy = root / "etc/openasrportal"
     for parent in (directory.parent, directory):
         if parent.is_symlink():
@@ -77,7 +92,7 @@ def configure(root, previous_version=""):
         values = {
             "OPENASRPORTAL_HOST": "127.0.0.1",
             "OPENASRPORTAL_PORT": "10087",
-            "OPENASRPORTAL_DATA": "/var/lib/openasr/portal/data",
+            "OPENASRPORTAL_DATA": "/var/lib/OpenASR/portal/data",
         }
         with os.fdopen(
             os.open(environment, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640), "w"
@@ -96,8 +111,9 @@ def configure(root, previous_version=""):
             staged.rename(data)
     data.mkdir(exist_ok=True, mode=0o700)
     cleaned = [
-        "OPENASRPORTAL_DATA=/var/lib/openasr/portal/data"
-        if migrate and line.partition("=")[0].strip() == "OPENASRPORTAL_DATA"
+        "OPENASRPORTAL_DATA=/var/lib/OpenASR/portal/data"
+        if (migrate or values.get("OPENASRPORTAL_DATA") == "/var/lib/openasr/portal/data")
+        and line.partition("=")[0].strip() == "OPENASRPORTAL_DATA"
         else line
         for line in lines
         if line.partition("=")[0].strip()
@@ -114,7 +130,7 @@ def configure(root, previous_version=""):
         # Preserve the old location for administrator recovery without retired keys.
         shutil.copy2(environment, legacy / "service.env")
     values = environment_values("\n".join(cleaned))
-    configure_data_access(root, values.get("OPENASRPORTAL_DATA", "/var/lib/openasr/portal/data"))
+    configure_data_access(root, values.get("OPENASRPORTAL_DATA", "/var/lib/OpenASR/portal/data"))
     port = int(values.get("OPENASRPORTAL_PORT", "10087"))
     if not 1 <= port <= 65535:
         raise ValueError("Invalid Portal port")

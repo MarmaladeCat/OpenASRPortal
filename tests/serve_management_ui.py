@@ -10,6 +10,7 @@ from aiohttp import web
 from support_auth import portal_for_tests as Portal
 from test_portal import FakeProvider
 
+from openasrportal.domain.provider_usage import UsageUpdate
 from openasrportal.storage.store import Store
 
 
@@ -18,6 +19,7 @@ async def main():
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--session-seconds", type=int, default=1800)
+    parser.add_argument("--usage-fixture", action="store_true")
     args = parser.parse_args()
     from openasrportal.storage import auth
 
@@ -31,6 +33,10 @@ async def main():
             portal = FreshPortal(Store(directory), factory=FakeProvider)
         else:
             portal = Portal(Store(directory), "test-asr", "test-admin", factory=FakeProvider)
+        if args.usage_fixture:
+            portal.store.usage.new_session("ui-usage", None, "ui-fixture", "ui-fixture")
+            for report in (UsageUpdate("request", "duration", 12.5), UsageUpdate("item", "unknown", None)):
+                portal.store.usage.report_provider_usage("ui-usage", report)
         runner = web.AppRunner(portal.app())
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1", args.port)

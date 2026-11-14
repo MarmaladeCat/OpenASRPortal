@@ -12,7 +12,7 @@
 
 在每个上游档案中勾选“使用全局 Proxy 代理”并保存，所有提供商的连接测试和新识别连接均遵循此选择。代理不可用或未配置时直接报错，不会绕过代理；未勾选的档案直连。全局地址留空可移除代理；已建立的识别连接保持原路径。HTTPS 表示连接代理本身也使用 TLS，WSS 流量还会校验上游证书；私有代理证书应加入服务所在机器的受信任 CA 存储。
 
-适用版本：**1.1.1**。本文面向安装服务、配置识别上游和管理客户端的用户。客户端开发见 [识别 API](API.zh-CN.md)，自动化管理见 [管理协议](MANAGEMENT.zh-CN.md)。项目采用 [GPL v3](../LICENSE)。
+适用版本：**1.2.0**。本文面向安装服务、配置识别上游和管理客户端的用户。客户端开发见 [识别 API](API.zh-CN.md)，自动化管理见 [管理协议](MANAGEMENT.zh-CN.md)。项目采用 [GPL v3](../LICENSE)。
 
 服务开通、API Key 获取及对应的 Portal 填写步骤分别见 [豆包语音 API 开通指南](doubao-api-setup.zh-CN.md)和 [阿里云百炼 API 开通指南](bailian-api-setup.zh-CN.md)。
 
@@ -24,7 +24,11 @@
 
 每个上游以独立描边面板展示带标签的只读字段。“修改”解锁当前面板，“保存”应用更改，“取消”恢复已保存值；提供商固定字段和配置 ID 始终只读。密钥不回显，已有密钥留空时保留原值。“启用”开关即时生效，“使用全局 Proxy 代理”随档案编辑并保存。测试使用当前显示的配置（包括未保存的代理选择），在本面板内显示连接路径、结果和耗时。
 
-新建 Soniox 档案默认英文、中文提示（`en,zh`）。百炼和 Boson 默认自动识别，包含英文、中文，也可选择单一语种。已有档案保留其保存的语言选择。
+新建 Soniox 档案默认中文、英文提示（`zh,en`），面向大量中文夹杂少量英文；提示顺序不代表语言权重。百炼和 Boson 默认自动识别，也可选择单一语种。已有档案保留其保存的语言选择。
+
+上游卡片展示预览时机、稳定粒度和录音上限。[OpenAI Realtime](openai-api-setup.zh-CN.md) 的 `gpt-live-transcribe` 提供录音中预览，`gpt-transcribe` 在停止后开始转写。**OpenAI · 完整录音文件** 停止后仅发送一次 WAV：JSON 返回整段结果，SSE 上传后逐步出字。**OpenLocalASR · 完整录音文件** 无预览，每轮限 60 秒。文件 SSE 不代表录音中出字，使用可协商较短上限的客户端；预览时机未知也不承诺实时。见[工作流语义](recognition-contract.zh-CN.md)。
+
+用量区分本地已接受音频额度与上游报告的 Token／时长。文件提交前取消不产生云请求，提交后取消仍可能收费；未知用量明确展示，不算零。
 
 ### 1.1 Portal 在系统中的位置
 
@@ -68,12 +72,12 @@ Windows 常规使用原生 MSI 服务；Linux 单机可用 deb，需要容器化
 
 ### 2.2 Windows：安装系统服务
 
-1. 运行 `OpenASRPortal_1.1.1_windows_amd64.msi`，按向导授权安装服务。
+1. 运行 `OpenASRPortal_1.2.0_windows_amd64.msi`，按向导授权安装服务。
 2. 在浏览器打开 `http://127.0.0.1:10087/admin`。若端口已被占用，先确认是否已有 Portal 实例，避免初始化到错误服务。
 3. 完成第 2.5 节的首次密码、上游和客户端设置。
 4. 通过 Windows“服务”查看 OpenASRPortal 的运行状态。关闭浏览器不会停止服务。
 
-当前源码默认数据在 `%ProgramData%\OpenASR\Portal\data`，服务配置 `service.json` 在其父目录。旧安装包使用 `%ProgramData%\OpenASRPortal`，迁移、合体包和语言选择见 [安装生命周期](installation.zh-CN.md)。备份时不要只复制 Program Files。
+独立版、合体版和前台启动默认数据均在 `%ProgramData%\OpenASR\portal\data`，服务配置 `service.json` 在其父目录。旧安装包使用 `%ProgramData%\OpenASRPortal`，迁移、合体包和语言选择见 [安装生命周期](installation.zh-CN.md)。备份时不要只复制 Program Files。
 
 ![Windows 的真实 Portal 管理页](images/windows-admin.png)
 
@@ -84,12 +88,12 @@ Windows 常规使用原生 MSI 服务；Linux 单机可用 deb，需要容器化
 在下载目录执行，ARM64 替换为对应文件：
 
 ```bash
-sudo apt install ./OpenASRPortal_1.1.1_linux_amd64.deb
+sudo apt install ./OpenASRPortal_1.2.0_linux_amd64.deb
 systemctl status openasrportal
 curl http://127.0.0.1:10087/health
 ```
 
-浏览器访问同一 `/admin` 地址。当前源码数据在 `/var/lib/openasr/portal/data`，服务环境配置在 `/var/lib/openasr/portal/service.env`；旧默认 `/var/lib/openasrportal` 与 `/etc/openasrportal/service.env` 安装时迁移。日常网页管理不需要 sudo，修改服务环境后由管理员重启 `openasrportal`。
+浏览器访问同一 `/admin` 地址。默认数据在 `/var/lib/OpenASR/portal/data`，服务环境配置在 `/var/lib/OpenASR/portal/service.env`；旧 `/var/lib/openasr/portal`、`/var/lib/openasrportal` 与 `/etc/openasrportal/service.env` 安装时迁移。日常网页管理不需要 sudo，修改服务环境后由管理员重启 `openasrportal`。
 
 ![Linux 的真实 Portal 管理页](images/linux-admin.png)
 
@@ -97,7 +101,7 @@ curl http://127.0.0.1:10087/health
 
 ### 2.4 Linux：Docker 镜像包
 
-解压对应架构的 `OpenASRPortal_1.1.1_linux_amd64.tar.gz`，进入包内 `OpenASRPortal` 目录：
+解压对应架构的 `OpenASRPortal_1.2.0_linux_amd64.tar.gz`，进入包内 `OpenASRPortal` 目录：
 
 ```bash
 docker load -i image.tar
@@ -162,7 +166,7 @@ LocalASR 未 ready 时先完成其模型准备；Portal 不代替它下载或切
 
 - 官方 WebSocket 地址由程序提供，页面为只读。
 - 填写当前服务所需 API Key；“模型资源”选择控制台实际开通的资源，选项包括 seedasr/bigasr 的 duration/concurrent 系列。
-- “二遍识别”默认开启，后续修订可能替换首遍文字；关闭前先比较准确率和结束等待时间。
+- 新档案“二遍识别”默认关闭，避免启用它的上游 VAD。已有开启配置保留；静音窗口范围 300–5000 ms、默认 5000 ms，旧越界值迁移到最近边界。详见[豆包设置](doubao-api-setup.zh-CN.md)。
 - 不同账号可保存多张档案，各自配置 Key、顺序和额度。
 
 **百炼 · Qwen ASR Streaming**
@@ -171,21 +175,21 @@ LocalASR 未 ready 时先完成其模型准备；Portal 不代替它下载或切
 - 当前模型字段为只读 `qwen-audio-3.1-asr-flash-streaming`；请授权这个完整型号。
 - 识别语种可自动或指定；明确已知语种时可选对应项。
 - 音频通过 WebSocket 上传一次，partial 直接来自模型。读取旧 HTTP 档案时自动迁移，保留 Key 和配额。
-- 服务端断句静音范围 200–6000 ms，默认 800 ms；较短更早结束语段，较长容纳思考停顿。
+- 服务端断句静音范围 200–6000 ms，新默认 6000 ms。旧档案保存值不变，可手动调大以容纳思考停顿；这不能完全关闭上游分段。
 - “保留方言表达”按需要开启，默认关闭。最终效果仍依赖上游模型。
 
 **Boson AI · Higgs STT**
 
 - 使用只读官方 WebSocket 地址、`higgs-stt-3.1` 模型及 Boson API key。
-- 语种为 `auto` 或两位语言提示；断句静音为 600–3000 毫秒，默认 800 毫秒。
-- 音频实时上传，停顿、达到 15 秒或停止录音时返回分段文本。没有逐字预览和会话热词，使用时长额度。
+- 语种为 `auto` 或两位语言提示，没有本地静音阈值。
+- 全部音频（包括停顿）实时上传，停止录音后返回文本。不做本地裁剪，没有逐字预览和会话热词，使用时长额度。
 - 详见 [Boson 开通与协议行为](boson-api-setup.zh-CN.md)。
 
 **Soniox · 实时语音识别**
 
 - 固定 `stt-rt-v6` 模型及官方 WebSocket 地址，握手时用 API Key 鉴权。
-- 语种为 `auto` 或两位提示代码；最大端点延迟 500–3000 ms，默认 2000。
-- 真实 partial、语义端点定稿及上下文热词。使用音频时长配额；Soniox 云端另按连接时长计费。见 [Soniox 开通](soniox-api-setup.zh-CN.md)。
+- 语种可选自动或语言提示；默认关闭端点检测。最大端点延迟（500–3000 ms，默认 2000）仅开启检测时生效。
+- 真实 partial、默认停止后定稿及上下文热词。使用音频时长配额；Soniox 云端另按连接时长计费。见 [Soniox 开通](soniox-api-setup.zh-CN.md)。
 
 ### 3.5 下游客户端：派发、查看、撤销
 
@@ -269,11 +273,11 @@ Portal 在容器中时 `127.0.0.1` 是它自己。连接同一 Docker 网络的 
 
 ```powershell
 # 管理员 PowerShell；默认安装位置
-& "$env:ProgramFiles/OpenASRPortal/python/python.exe" -B -m openasrportal.entrypoints.admin --data-dir "$env:ProgramData/OpenASR/Portal/data"
+& "$env:ProgramFiles/OpenASRPortal/python/python.exe" -B -m openasrportal.entrypoints.admin --data-dir "$env:ProgramData/OpenASR/portal/data"
 ```
 
 ```bash
-sudo -u openasrportal /usr/bin/openasrportal --data-dir /var/lib/openasr/portal/data --reset-admin-password
+sudo -u openasrportal /usr/bin/openasrportal --data-dir /var/lib/OpenASR/portal/data --reset-admin-password
 ```
 
 源码环境使用自身 Python 的 `-m openasrportal.entrypoints.admin --data-dir <实际目录>`。恢复撤销管理会话，保留档案、识别 Key 和业务数据；密码不作为命令行明文参数。

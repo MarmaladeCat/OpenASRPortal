@@ -9,8 +9,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from ..domain.config import migrate_config, public_config, validate_config
-from ..domain.hotwords import capability
+from ..domain.config import migrate_config, public_config
+from ..providers.registry import definition
 from .auth import AuthStore
 from .hotwords import HotwordStore
 from .key_vault import KeyVault, VaultError
@@ -72,13 +72,12 @@ class Store:
 
     def save(self, profile_id, title, provider, patch):
         previous = self.get(profile_id)
-        configuration = validate_config(
-            provider,
+        configuration = definition(provider).validate(
             patch,
             previous["configuration"] if previous and previous["provider"] == provider else None,
         )
         quota = self.usage.quota("profile", profile_id)
-        if provider != "bailian_qwen_asr" and quota and quota["remainingTokens"] is not None:
+        if not getattr(definition(provider).factory, "token_metered", False) and quota and quota["remainingTokens"] is not None:
             raise ValueError("切换到不提供 Token 用量的上游前，请先清除该配置的 Token 限额")
         with self.connection() as connection:
             connection.execute(
@@ -276,7 +275,6 @@ class Store:
         return [self.public(self.get(profile_id), admin=admin) for profile_id in ids]
 
     def public(self, profile, *, admin=False):
-        streaming = profile["provider"] in ("doubao_realtime", "bailian_qwen_asr", "soniox_realtime")
         quota = self.usage.quota("profile", profile["id"])
         if quota is not None and not admin:
             quota = {
@@ -289,12 +287,5 @@ class Store:
             "provider": profile["provider"],
             "configuration": public_config(profile["configuration"], profile["provider"]),
             "quota": quota,
-            "capabilities": {
-                "partialResults": profile["provider"] != "boson_realtime",
-                "textProcessing": "native",
-                "latencyClass": "streaming" if streaming else "segmented",
-                "audio": {"encoding": "pcm_s16le", "sampleRate": 16000, "channels": 1},
-                "tokenUsage": profile["provider"] == "bailian_qwen_asr",
-                "hotwords": capability(profile["provider"]),
-            },
+            "capabilities": definition(profile["provider"]).capabilities(profile["configuration"]),
         }

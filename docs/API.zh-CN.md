@@ -8,7 +8,7 @@ HTTP 和 WebSocket 都属于 v1；不直接连接豆包、百炼或 LocalASR 的
 
 ## 1. 职责、地址与认证
 
-`boson_realtime` 的能力为 `partialResults: false`、`latencyClass: segmented`，不支持 Token 计量和会话热词。音频实时上传，在停顿、达到 15 秒或 `audio.end` 时返回 `transcript.final`。客户端须接受没有前置 partial 的 final；现有 v1 事件结构不变。见 [Boson 行为说明](boson-api-setup.zh-CN.md)。
+`boson_realtime` 的能力为 `partialResults: false`、`latencyClass: segmented`、`finalization: audio.end`，不支持 Token 计量和会话热词。完整音频实时上传，停止录音后定稿，不做本地静音或 15 秒切段。客户端须接受没有前置 partial 的 final。见 [Boson 行为说明](boson-api-setup.zh-CN.md)和[可复制 Python 客户端](python-client.zh-CN.md)。
 
 - 默认 Portal 地址：`http://127.0.0.1:10087`；Input 设置填写 HTTP(S) origin，不带业务路径、查询或用户密码。
 - 客户端采集麦克风、重采样、显示波形和预编辑、判断输入目标并提交文字。
@@ -62,6 +62,8 @@ HTTP 和 WebSocket 都属于 v1；不直接连接豆包、百炼或 LocalASR 的
   "maxSessions": 8,
   "maxRecordingMs": 300000,
   "resumable": false,
+  "features": ["cancelDuringFinalization", "requestConflictDetection"],
+  "limits": {"maxMessageBytes": 1048576, "recommendedChunkBytes": 6400, "maxAudioBytes": 9600000, "ticketTtlMs": 30000},
   "hotwords": {
     "version": 1,
     "path": "/v1/hotwords",
@@ -120,7 +122,9 @@ Input 在不支持热词 v1 时提示升级。新客户端可用 `publicDictiona
 
 `configuration` 的其他字段随 provider 变化，密钥不回显。`quota` 也可能为 null。
 `profileId` 是 Portal 档案 ID，不是模型名称；客户端不直接通过创建会话切换上游模型。
-`latencyClass=streaming` 表示流式，`segmented` 表示分段/轮询式预览，不承诺同样延迟。
+`latencyClass=streaming` 表示录音中预览，`segmented` 是其他或未知时机的兼容值，不承诺轮询式预览。
+
+`capabilities.recognition` 分别说明上游输入、处理方式、预览时机、稳定单位、完成边界和二遍能力；`capabilities.limits` 提供有效预算。完整定义及工作流矩阵见[识别工作流与有序结果](recognition-contract.zh-CN.md)。文件 SSE 和 commit 后转写的 WS 不代表实时预览。需要录音中出字时要求 `realtimePreview`；短于 300 秒的新配置必须协商 `effectiveSessionLimits`。
 
 ## 4. 创建会话与一次性连接
 
@@ -141,6 +145,10 @@ Input 在不支持热词 v1 时提示升级。新客户端可用 `publicDictiona
 | clientRequestId | 可省略；文本，最多 200 字符；推荐每轮一个 UUID                |
 | purpose         | 当前 Input 固定发送 dictation；描述用途，不另授权限           |
 | audio           | 可省略；填写时必须与协商的 PCM16 / 16 kHz / 单声道完全相同    |
+| protocolVersion | 可省略，缺省整数 1；其他版本返回 UNSUPPORTED_PROTOCOL |
+| requiredFeatures | 可选字符串数组，每项必须在 capabilities.features 中公布 |
+
+`purpose` 为 1–100 字符的非空字符串，缺省 `dictation`。不支持的必要能力在分配前返回 `UNSUPPORTED_FEATURE`。可忽略新增可选字段；依赖新语义时明确要求能力。档案能力还公布 `localSegmentation: false` 及 `finalization: audio.end | upstream`。所有接收的 PCM（含静音）完整转发，传输块不是断句；这些字段描述适配器策略，不保证上游标点。旧服务可能省略这些字段。
 
 非空 profileId 的格式为 `[A-Za-z0-9][A-Za-z0-9_.-]{0,99}`。
 显式选择不存在或停用的档案时不会偷偷切换到其他档案。
@@ -153,15 +161,17 @@ Input 在不支持热词 v1 时提示升级。新客户端可用 `publicDictiona
   "sessionId": "session-example",
   "ticket": "one-time-ticket-example",
   "streamPath": "/v1/sessions/session-example/stream",
-  "ticketExpiresInMs": 29999
+  "ticketExpiresInMs": 29999,
+  "readyTimeoutMs": 45000
 }
 ```
 
 ticket 默认 30 秒有效，单次使用。返回 TTL 是剩余毫秒；不要把示例值写死。
 Input 校验 streamPath 恰为当前 session 的同源路径，再连接原 Portal 的 WS/WSS 地址。
 
-**创建重试的幂等范围**：同 Key、同非空 clientRequestId、尚未连接且未过期时返回同一描述，
-不会延长 ticket 期限；已建立 WS 返回 409 `SESSION_STARTED`。
+创建响应另含解析后的 `profileId`、固定 `capabilities`、`limits`，在 `session.ready` 中原样重复。协商 `recognitionCapabilities` / `effectiveSessionLimits` 的客户端必须消费这些快照。旧服务缺少可选字段表示能力未知、沿用 300 秒旧上限。较短的新限制也适用于预录音；已经超限的缓存明确拒绝，不静默裁剪。
+
+**创建重试的幂等范围**：同 Key、同非空 clientRequestId、同一规范化档案选择/purpose/必要能力，且未连接未过期时复用描述，不延长 ticket。参数变化返回 409 `REQUEST_CONFLICT`，重试仍须通过全部参数校验；已建立 WS 返回 409 `SESSION_STARTED`。
 会话结束或过期清理后，不再保证同请求 ID 返回旧会话，因此不能用它重放已识别音频。
 
 ### 4.2 WebSocket 握手
@@ -187,8 +197,9 @@ ticket 已使用、会话不存在或 Key 已撤销，握手返回 401 `AUTH_FAI
 - 每个块字节数为偶数；Input 发送的块非空，每个 16 位样本完整。
 - 20 ms 音频为 640 字节，200 ms 为 6400 字节；服务端内部按 6400 字节批量发送上游。
 - 上游双向流动期间持续读取事件，不能等上传全部结束才开始接收。
-- 单条 WS 消息最大 1 MiB；最大录音 300 秒，音频总量上限 9600000 字节。
-- Input 当前在约 295 秒主动收尾，为服务端五分钟限制留出余量。
+- 单条 WS 消息最大 1 MiB；全局最大录音 300 秒、9600000 字节；每轮优先遵守更小的 `limits.maxRecordingMs`。
+- Portal 从 ready 起按有效录音预算等待 `audio.end` 或配额收尾，否则返回 `SESSION_TIMEOUT`；源样本计数独立执行相同限制。
+- Input 在 295 秒和协商上限的较小值暂停，从采集启动计时、包含 ready 前缓存；累计 PCM 预算也包含停止尾帧。
 - Portal 使用 WS heartbeat 30 秒；不是自定义业务 `ping` 控制消息。
 
 ### 5.2 正常收尾
@@ -201,7 +212,9 @@ ticket 已使用、会话不存在或 Key 已撤销，握手返回 401 `AUTH_FAI
 
 发送后停止上传音频，但继续接收 partial/final，直至 `session.finished` 或失败终态。
 `audio.end` 会把尚未凑满批次的 PCM 一起 flush；不要用关闭 socket 代替收尾。
-Input 按 ready 返回的 finalizeTimeoutMs 设置一次性的收尾截止时间，新 partial 不延长截止时间。
+Input 发出 audio.end 时启用一次性 `finalizeTimeoutMs`，包括已经等待中的 receive；partial 不续期。Portal 排空尾部 PCM 后等待真实提交屏障：包括内部上传队列、转换尾部、WS commit 或 HTTP body 最后字节写入并 drain。文件路径停录后整轮仅提交一次。控制读取独立且可取消；PCM 积压最多 60 秒、每次 write 最多 15 秒、结束至提交为 `uploadTimeoutMs`（75 秒）。豆包保留实时发送节奏。真实提交后才开始 `recognitionTimeoutMs`，超时为 `FINALIZATION_TIMEOUT`；上传超时为 `UPLOAD_TIMEOUT`。`finalizeTimeoutMs` 是两者之和再加 1 秒余量。零源样本本地完成，不发文件请求或 commit；非零静音正常上传。
+
+重复 audio.end 幂等忽略；显式结束后继续音频返回 `INVALID_STATE`。额度自动收尾后仍在途的音频可丢弃。无效控制 JSON 或未知控制类型返回 `INVALID_REQUEST`。
 
 ### 5.3 取消
 
@@ -221,6 +234,8 @@ DELETE /v1/sessions/{sessionId}
 同 Key 可以取消自己的任意会话；客户端应只取消自己创建的 sessionId。
 取消是放弃本轮，区别于等待定稿的 audio.end；不能把 session.cancelled 当作成功 finished。
 
+audio.end 后等待上游定稿时，仍可通过同一 WS 取消。定稿/取消竞争只产生一个终态，终态后的取消无操作，已交付的稳定文字不能撤回。
+
 ## 6. 服务端事件与结果账本
 
 ### 6.1 公共字段
@@ -239,12 +254,12 @@ DELETE /v1/sessions/{sessionId}
   "seq": 1,
   "audio": { "encoding": "pcm_s16le", "sampleRate": 16000, "channels": 1 },
   "textProcessing": "native",
-  "finalizeTimeoutMs": 11000,
+  "finalizeTimeoutMs": 81000,
   "hotwords": { "supported": true, "appliedCount": 2, "omittedCount": 0 }
 }
 ```
 
-ready 每个会话一次；验证 audio 与预期一致、finalizeTimeoutMs 为正整数。
+ready 每个会话一次；等待预算采用创建响应的 `readyTimeoutMs`（45 秒），覆盖 Token 账户排队及提供方初始化各 20 秒，全程允许取消。验证 audio 与预期一致、`finalizeTimeoutMs` 为正整数，后者包含上传排空。
 超时值取决于实际 provider。hotwords 是创建时的快照计数，不是整张个人表。
 `supported=true` 不等于热词已开启；默认关闭时 appliedCount 为 0。
 
@@ -291,6 +306,8 @@ final 终结这一语句，之后不再允许改写已定稿正文；下一语�
 忽略旧 revision，但仍消费对应的新 seq。重复 final 不重复提交；final 正文被改写视为协议错误。
 空 final 也计入 finalCount，尽管没有字符需要上屏。所有 provider 的最终结果使用相同字段。
 
+Portal 发布按音频顺序的不可变前缀和一个可替换预览尾部，先解决交错上游结果和二遍修订，再发送 final。一个公共 utterance 可合并多个上游单位；final 可以短于此前预览，剩余尾部随后用新 ID 预览。`seq` 不证明上游音频顺序。缺少顺序证据、冲突定稿、未解决单位（包括空候选）均不能成功。未知时间为 `null`，不伪造词时间。
+
 ### 6.4 成功、取消和错误终态
 
 ```json
@@ -298,6 +315,8 @@ final 终结这一语句，之后不再允许改写已定稿正文；下一语�
 ```
 
 `finalCount` 必须等于客户端收到的唯一 final 数量。Input 还要求不存在未定稿的非空 preview。
+
+finished 另报源采样率（16 kHz）的 `acceptedAudioSamples`、`submittedAudioSamples`，分别表示 Portal 接受量和本地上游写出完成量，不表示供应商处理 ACK。配额完成另含 `truncated: true`；普通超出录音上限报 `AUDIO_LIMIT`，不静默裁剪。
 只收到 socket 关闭但没收到终态，不能认为录音成功。
 
 配额用尽导致自动收尾时：
@@ -525,7 +544,7 @@ DELETE 使用 `{"revision":n}`。这些写入也增加该 Key 个人 revision。
 WS 阶段错误通过 session.error 报告，例如 AUDIO_LIMIT、SESSION_TIMEOUT、FINALIZATION_TIMEOUT、
 UPSTREAM_CLOSED、CLIENT_DISCONNECTED、UPSTREAM_ERROR；部分解析/上游异常合并为 UPSTREAM_ERROR。
 先停止采集和上传，清除本轮预编辑，保留未确认文字。新录音使用新 generation、sessionId 和 ticket。
-提供 requestId 可协助定位错误；错误码比中文 message 更适合程序分支。
+可识别的上游鉴权、额度和参数失败分别返回 `UPSTREAM_AUTH_FAILED`、`UPSTREAM_QUOTA_EXHAUSTED`、`UPSTREAM_INVALID_REQUEST`，且 `retryable=false`；限流为 `UPSTREAM_BUSY`，上传阻塞为 `UPLOAD_TIMEOUT`，结果身份／顺序／稳定性无效为不可重试的 `UPSTREAM_PROTOCOL_ERROR`。未知异常保留 `UPSTREAM_ERROR`。不回显上游原始正文或密钥，`requestId` 定位本次失败；程序按错误码和重试属性分支。
 
 ## 10. 最小调用顺序与 HTTP 示例
 

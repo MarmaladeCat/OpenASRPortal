@@ -3,12 +3,12 @@
 import argparse
 import os
 import sys
-from pathlib import Path
 
 from aiohttp import web
 
 from ..api.server import Portal
 from ..storage.store import Store
+from .paths import data_directory
 
 
 def application(args):
@@ -38,9 +38,8 @@ def main():
     parser.add_argument(
         "--port", type=int, default=int(os.environ.get("OPENASRPORTAL_PORT", "10087"))
     )
-    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
     parser.add_argument(
-        "--data-dir", default=os.environ.get("OPENASRPORTAL_DATA", str(data_home / "openasrportal"))
+        "--data-dir", default=str(data_directory())
     )
     args = parser.parse_args()
     if args.reset_admin_password:

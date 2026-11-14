@@ -24,8 +24,9 @@ export const messages = {
   '自动识别（含英文、中文）': 'Automatic (including English and Chinese)',
   英文: 'English',
   中文: 'Chinese',
-  '默认 en,zh（英文、中文）；auto 自动识别，或用逗号分隔两位语言代码。':
-    'Default: en,zh (English, Chinese). Use auto for automatic detection, or comma-separated two-letter language codes.',
+  '中文为主，夹杂英文': 'Mostly Chinese with some English',
+  '默认 zh,en，面向中文为主、夹杂英文；提示顺序不代表语言权重。':
+    'Default: zh,en for mostly Chinese with some English; hint order does not set language weights.',
   'Soniox 语种须为 auto 或逗号分隔的两位小写语言代码':
     'Soniox language must be auto or comma-separated lowercase two-letter language codes.',
   'Proxy 代理': 'Proxy',

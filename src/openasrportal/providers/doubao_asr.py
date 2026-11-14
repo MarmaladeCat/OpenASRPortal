@@ -9,7 +9,9 @@ import uuid
 from websockets.exceptions import InvalidStatusCode
 
 from ..diagnostics import mark, span, websocket_options
-from ..domain.asr_protocol import ProviderError, text_event
+from ..domain.asr_protocol import ProviderError
+from ..domain.transcript import MAX_UNITS, ResultEmitter, protocol_error
+from .base import StreamingProvider
 from .transport import connect
 
 
@@ -55,65 +57,77 @@ def decode_packet(data):
     return payload, bool(flags & 2)
 
 
-def result_message(kind, utterance):
-    text = utterance.get("text", "")
-    return text_event(
-        kind,
-        text,
-        utterance.get("start_time", 0),
-        utterance.get("end_time", 0),
-        utterance.get("additions", {}).get("source", ""),
-    )
-
-
 class ResultNormalizer:
-    """full 模式会重发历史分句；只提交新定稿，预览只包含尚未定稿的尾部。"""
+    """Full snapshots prove order; mutable splits/merges share one tail identity."""
 
     def __init__(self):
-        self.committed_end = -1
-        self.partial = ""
+        self.committed = []
+        self.results = ResultEmitter()
+        self.order = 0
+
+    def replace(self, items, stable=False):
+        return self.results.replace(
+            f"window:{self.order}", self.order, "".join(item["text"] for item in items),
+            stable=stable, start=items[0].get("start_time") if items else None,
+            end=items[-1].get("end_time") if items else None,
+            source=items[-1].get("additions", {}).get("source", "") if items else "",
+        )
 
     def accept(self, payload, last=False):
-        result = payload.get("result", {})
-        if not isinstance(result, dict):
-            return []
-        events, pending = [], []
-        for utterance in result.get("utterances", []):
-            end = utterance.get("end_time", 0)
-            if end <= self.committed_end:
-                continue
-            if utterance.get("definite") or last:
-                if utterance.get("text", "").strip():
-                    events.append(result_message("final_result", utterance))
-                self.committed_end = end
-            else:
-                pending.append(utterance)
-        partial = "".join(item.get("text", "") for item in pending)
-        if partial != self.partial or events:
-            events.append(
-                result_message(
-                    "partial_result",
-                    {
-                        "text": partial,
-                        "start_time": pending[0].get("start_time", 0) if pending else 0,
-                        "end_time": pending[-1].get("end_time", 0) if pending else 0,
-                    },
-                )
-            )
-            self.partial = partial
-        return events
+        try:
+            result = payload.get("result", {})
+            if not isinstance(result, dict):
+                raise ValueError()
+            if "utterances" not in result:
+                if result.get("text"):
+                    raise ValueError()  # Requested show_utterances/full; no order evidence.
+                if last:
+                    self.results.finish()
+                return []
+            items = result["utterances"]
+            if not isinstance(items, list) or len(items) > MAX_UNITS:
+                raise ValueError()
+            for item in items:
+                if not isinstance(item["text"], str) or type(item["definite"]) is not bool:
+                    raise ValueError()
+            if len(items) < len(self.committed) or any(
+                    not item["definite"] or item["text"] != text
+                    for item, text in zip(items, self.committed)):
+                raise ValueError()
+            tail = items[len(self.committed):]
+            count = 0
+            while count < len(tail) and tail[count]["definite"]:
+                count += 1
+            # An empty/terminal snapshot is not proof of stability or withdrawal.
+            if last and (count < len(tail) or (not count and any(
+                    not item.stable for item in self.results.results.values()))):
+                raise ValueError()
+            events = []
+            if count:
+                events.extend(self.replace(tail[:count], stable=True))
+                self.committed.extend(item["text"] for item in tail[:count])
+                self.order += 1
+            if tail[count:] or (not last and f"window:{self.order}" in self.results.results):
+                events.extend(self.replace(tail[count:]))
+            if last:
+                self.results.finish()
+            return events
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise protocol_error() from None
 
 
-class DoubaoProvider:
+class DoubaoProvider(StreamingProvider):
     text_processing = "native"
     label = "豆包"
     finish_timeout = 5
+    realtime_upload = True
 
     def __init__(self, config):
         self.config = config
         self.socket = None
         self.sequence = 1
         self.results = ResultNormalizer()
+        self.next_audio_at = 0
 
     async def open(self):
         mark("upstreamConnectStart")
@@ -133,10 +147,7 @@ class DoubaoProvider:
                     **websocket_options(),
                 )
         except InvalidStatusCode as error:
-            raise ProviderError(
-                "豆包鉴权/连接失败（HTTP %d），请检查 API Key、模型资源及服务额度"
-                % error.status_code
-            ) from None
+            raise ProviderError.upstream("豆包", error.status_code) from None
         payload = {
             "user": {"uid": "opennotes"},
             "audio": {"format": "pcm", "codec": "raw", "rate": 16000, "bits": 16, "channel": 1},
@@ -147,9 +158,12 @@ class DoubaoProvider:
                 "show_utterances": True,
                 "result_type": "full",
                 "enable_nonstream": self.config["enableNonstream"],
-                "end_window_size": 800,
             },
         }
+        if self.config["enableNonstream"]:
+            # Two-pass recognition enables upstream VAD. Allow thinking pauses;
+            # otherwise omit the forced endpoint and use upstream semantic logic.
+            payload["request"]["end_window_size"] = self.config.get("silenceMs", 5000)
         if self.config.get("hotwords"):
             payload["request"]["corpus"] = {
                 "context": json.dumps(
@@ -166,7 +180,11 @@ class DoubaoProvider:
             decode_packet(await asyncio.wait_for(self.socket.recv(), 6))
 
     async def send_audio(self, pcm, last=False):
+        loop = asyncio.get_running_loop()
+        await asyncio.sleep(max(0, self.next_audio_at - loop.time()))
         await self.socket.send(encode_packet(2, self.sequence, pcm, last))
+        # Do not accumulate idle-time credit: buffered audio remains real-time.
+        self.next_audio_at = loop.time() + len(pcm) / 32000
         self.sequence += 1
 
     async def receive(self):

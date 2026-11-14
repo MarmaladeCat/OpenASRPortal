@@ -2,7 +2,7 @@
 
 **English** | [简体中文](installation.zh-CN.md)
 
-These behaviors apply to Portal 1.1.1 and the combined Input 1.1.1 + Portal 1.1.1 installers.
+These behaviors apply to Portal 1.2.0 and the combined Input 1.2.0 + Portal 1.2.0 installers.
 
 ## Install with Input
 
@@ -12,9 +12,9 @@ Each package has its own `filename.sha256`, containing only that package's check
 
 ## Directory and lifecycle
 
-Windows stores service configuration at `%ProgramData%\OpenASR\Portal\service.json` and default data in its `data\` subdirectory. Linux uses `/var/lib/openasr/portal/service.env` and `/var/lib/openasr/portal/data/`. Input uses sibling `Input/<SID>` or `input/<uid>` directories with user-private permissions. Only Portal opens its database.
+Windows stores service configuration at `%ProgramData%\OpenASR\portal\service.json` and default data in its `data\` subdirectory. Linux uses `/var/lib/OpenASR/portal/service.env` and `/var/lib/OpenASR/portal/data/`. Standalone, combined, foreground and source launches share the default data location. `OPENASR_DATA_ROOT` relocates the common namespace; `OPENASRPORTAL_DATA` or `--data-dir` explicitly overrides this product's database directory. Input uses sibling `input/<SID-or-UID>` directories. Only Portal opens its database.
 
-On upgrade, old default `%ProgramData%\OpenASRPortal`, `/etc/openasrportal/service.env`, and `/var/lib/openasrportal` configurations migrate while Portal is stopped. A configured custom data directory is retained. Keep legacy backups until the new installation is verified. Docker volumes and source-mode `--data-dir` remain explicit deployment choices.
+On upgrade, old default `%ProgramData%\OpenASRPortal`, `/var/lib/openasr/portal`, `/etc/openasrportal/service.env`, and `/var/lib/openasrportal` configurations migrate while Portal is stopped. Custom data paths are retained. Keep legacy backups until verified. Compose now binds the standard host data directory; existing named volumes require an explicit retained mount or an offline copy of the complete data directory. For old source/XDG deployments, stop Portal and copy the whole old directory, including its vault key, into the new `portal/data` before first launch; existing destinations must not be merged or overwritten.
 
 Linux installation grants the configured data directory a narrow systemd sandbox exception in `/etc/systemd/system/openasrportal.service.d/20-data-directory.conf`. If you change `OPENASRPORTAL_DATA` later, stop the service and run `sudo dpkg-reconfigure openasrportal` to refresh that exception. Existing custom data files must remain accessible to the `openasrportal` service account.
 
@@ -23,6 +23,16 @@ For a combined DEB use `sudo dpkg-reconfigure openasrinput-portal` instead. Pack
 Fresh Windows interactive installation or the Linux setup launcher opens `/admin/setup` if live authentication status says no administrator is configured. Set a password of at least 12 characters, then add an upstream. Upgrades and retained-data reinstallations preserve the administrator, client keys, profiles, hotwords, and quotas. An unfinished first setup continues after reinstall. Windows uses `OPENASRPORTAL_NO_LAUNCH=1` or `/qn` to suppress automatic opening; the Linux setup launcher accepts `--no-open`. On a headless service open the actual local management URL manually. The standalone Linux package prints that URL and tries to open setup when it can identify the invoking sudo user's graphical session.
 
 Uninstall retains configuration by default. Windows explicit data deletion also removes recognized legacy backups; Linux data deletion is a separate administrator operation. Back up the entire actual data directory, including `portal.db` and `asr-key-vault.key`, before deleting anything.
+
+### Retiring old Portal directories
+
+Once the new service's actual `service.json` / `service.env` and data path are verified, its profiles/keys/hotwords are present, and old services are stopped, the old defaults can be removed: Windows `%ProgramData%\OpenASRPortal`; Linux `/var/lib/openasr/portal`, `/etc/openasrportal/service.env`, and `/var/lib/openasrportal`. Remove the rest of `/etc/openasrportal` only after checking its contents and service references. Explicit custom data paths, old source/XDG directories, and Docker volumes remain active when a command, service configuration, or mount still selects them.
+
+For fresh-install acceptance, use an empty data root and empty legacy locations before first startup; retaining old defaults can trigger migration. Current `/var/lib/OpenASR/portal` and `%ProgramData%\OpenASR\portal` contain live data. Keep the database and vault key together. Never remove the entire shared OpenASR root for a Portal-only cleanup.
+
+## Explicit Linux data removal
+
+After stopping and uninstalling Portal, remove and purge retain data. Delete only Portal with `sudo rm -rf -- /var/lib/OpenASR/portal`; this removes its configuration, credentials, hotwords and usage. Inspect retained legacy directories, custom paths and old Docker volumes separately. The common root contains other products and must not be removed for a Portal-only cleanup.
 
 ## Interface language
 

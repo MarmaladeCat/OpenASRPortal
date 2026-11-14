@@ -235,7 +235,10 @@ async function refreshUsage() {
       ['下游提交音频', seconds(usage.total.audioSeconds)],
       ['上游请求音频', seconds(usage.total.upstreamAudioSeconds)],
       ['上游报告 Token', tokens(usage.total)],
-      ['上游请求次数', usage.total.requests.toLocaleString()]
+      ['上游请求次数', usage.total.requests.toLocaleString()],
+      ['上游报告时长', usage.providerUsage?.some((item) => item.kind === 'duration')
+        ? seconds(usage.providerUsage.find((item) => item.kind === 'duration').total) : '未上报'],
+      ['用量未知作用域', String(usage.providerUsage?.find((item) => item.kind === 'unknown')?.scopes || 0)]
     ]) {
       const card = document.createElement('article'),
         title = document.createElement('span'),
@@ -1080,6 +1083,7 @@ function inlineProfile(profile, card) {
     render();
   };
   controls.provider.onchange = () => {
+    profileResults.delete(profile.id);
     renderFields({}, controls.fields, entries, controls.provider.value);
     lock(false);
     panelStatus(output, '配置已更改，请重新测试');
@@ -1178,26 +1182,34 @@ function render() {
       actions.append(toggleLabel);
       toggle.onchange = async () => {
         toggle.disabled = true;
+        const feedback = { ...profileResults.get(profile.id) };
+        profileResults.set(profile.id, feedback);
+        const showFeedback = (message, state = '') => {
+          // An edit or probe started later owns the card's feedback now.
+          if (profileResults.get(profile.id) !== feedback) return;
+          Object.assign(feedback, { message, state });
+          const current = [...list.children].find((item) => item.dataset.id === profile.id);
+          if (current) panelStatus(current.querySelector('.probe-result'), message, state);
+        };
         try {
           const result = await request(
             `/v1/admin/profiles/${encodeURIComponent(profile.id)}/quota`,
             'PATCH',
             { enabled: toggle.checked }
           );
-          await refresh();
-          panelStatus(
-            [...list.children]
-              .find((item) => item.dataset.id === profile.id)
-              .querySelector('.probe-result'),
+          showFeedback(
             result.enabled
               ? '上游已启用。'
               : result.exhausted || result.tokenBlocked
                 ? '额度已用尽或无法计量，请先调整该上游的剩余配额。'
                 : '上游已停用，默认配置已按顺序调整。'
           );
+          // Publish before rendering the usable card; key/usage refreshes may finish
+          // after a newer probe and must not clear its pending or completed result.
+          await refresh();
         } catch (error) {
           toggle.checked = profile.quota.enabled;
-          panelStatus(card.querySelector('.probe-result'), error.message, 'error');
+          showFeedback(error.message, 'error');
         } finally {
           toggle.disabled = false;
         }
@@ -1227,6 +1239,23 @@ function render() {
       'danger'
     );
     card.append(title, actions);
+    const capability = document.createElement('p');
+    capability.className = 'recognition-capability';
+    const recognition = profile.capabilities?.recognition;
+    const phases = { during_capture: '录音中预览', after_audio_end: '停止后逐步出字',
+      after_commit: '提交后逐步出字', none: '停止后识别' };
+    const units = { token: '稳定词块', utterance: '稳定分句', turn: '整轮定稿', recording: '整轮定稿' };
+    const labels = [phases[recognition?.preview?.phase] || '预览时机未知',
+      units[recognition?.stability?.unit] || '稳定粒度未知'];
+    if (profile.capabilities?.limits?.maxRecordingMs)
+      labels.push(`录音上限 ${profile.capabilities.limits.maxRecordingMs / 1000} 秒`);
+    for (const label of labels) {
+      if (capability.childNodes.length) capability.append(' · ');
+      const value = document.createElement('span');
+      value.textContent = label;
+      capability.append(value);
+    }
+    card.append(capability);
     inlineProfile(profile, card);
     const quota = quotaControls(
       'profile',

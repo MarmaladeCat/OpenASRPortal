@@ -2,7 +2,7 @@
 
 **English** | [简体中文](doubao-api-setup.zh-CN.md)
 
-Create a Volcengine project, activate **Doubao streaming speech recognition 2.0**, and bind its API key to an upstream profile in OpenASRPortal **1.1.1**.
+Create a Volcengine project, activate **Doubao streaming speech recognition 2.0**, and bind its API key to an upstream profile in OpenASRPortal **1.2.0**.
 
 ## 1. Sign in to Volcengine
 
@@ -47,7 +47,8 @@ Use the **API key** from the new Doubao Speech console. If the page shows legacy
 | Upstream API key | The newly created API key; enter only the key |
 | WebSocket endpoint | Keep `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async` (read-only) |
 | Model resource | 2.0 duration edition: `volc.seedasr.sauc.duration` |
-| Second-pass recognition | Keep enabled by default |
+| Second-pass recognition | Off for new profiles; avoids enabling upstream VAD segmentation |
+| Segmentation silence | 5000 ms by default; 300–5000 ms, only when second-pass is enabled |
 | Use proxy | Off for direct access; enable only after configuring Portal's global HTTP/HTTPS proxy |
 
 3. For an existing card, select **Edit** first; otherwise fill the new-connection form. Choose **Use proxy** before **Test upstream connection**. The test uses the current form values and proxy choice, with its result inside that panel. It does not save the form. Select **Save** after success; **Cancel** discards edits.
@@ -58,7 +59,8 @@ The Doubao API key is now bound to Portal's upstream. Select this profile in a c
 ## Recognition and network settings
 
 - Match the resource to the service you activated: 2.0 duration is `volc.seedasr.sauc.duration`, 2.0 concurrency is `volc.seedasr.sauc.concurrent`. The `volc.bigasr.sauc.*` choices are the older 1.0 resources. A valid key alone does not grant every resource.
-- Second-pass recognition revises a completed segment after streaming previews. Keep it enabled initially. This Portal adapter does not expose a language-list field for Doubao; do not paste `en,zh` into the model/resource field. The interface language dropdown changes the page language, not the recognizer.
+- Second-pass recognition also enables upstream VAD. New profiles default to off and omit `end_window_size`, leaving semantic segmentation upstream. `silenceMs` accepts 300–5000 ms and defaults to 5000 to accommodate thinking pauses. Existing second-pass switches and valid silence values are retained. Previously saved values in 200–299 or 5001–6000 are adjusted to 300 or 5000 on read and persisted on the next save; new out-of-range submissions are rejected. All audio, including pauses, is uploaded; upstream semantic punctuation can still produce sentences. This adapter has no language-list field; do not enter `en,zh` in the resource field.
+- Only utterances explicitly marked `definite: true` become stable finals. A final transport packet cannot promote provisional text. An unresolved nonempty preview at completion is an error, not a successful empty transcript.
 - To use a proxy, save its address and optional authentication under **Settings → HTTP/HTTPS proxy**, test availability there, then enable **Use proxy** on this upstream. The proxy must support CONNECT to the WSS endpoint. An enabled but unavailable proxy fails explicitly; disabling the switch selects direct routing. The proxy address must be reachable from the Portal service, not just your browser.
 - Keep the card **Enabled** after saving. The connection test can consume upstream usage and establishes connectivity/model access, not microphone quality. Verify with a short Chinese phrase and a short English phrase from an actual client.
 

@@ -4,3 +4,5 @@ httpx==0.28.1
 cryptography>=46,<50
 tzdata>=2025.2
 jieba==0.42.1
+numpy>=1.26,<3
+soxr==1.1.0

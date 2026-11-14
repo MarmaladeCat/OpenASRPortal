@@ -1,32 +1,30 @@
 """Higgs Realtime input transcription, with manual turns and no generated replies.
 
-PCM is streamed as it arrives. Local energy-based segmentation commits at a pause
-or 15 seconds. Only one committed turn may be outstanding: Boson can supersede
-unfinished transcripts when a later turn arrives. No speculative text is emitted.
+Every PCM sample, including silence, is streamed as it arrives. Only audio.end
+commits the recording; transport chunk sizes are never sentence boundaries.
+No speculative text is emitted.
 """
 
-import array
 import asyncio
 import base64
 import json
 import logging
-import sys
 import time
 import uuid
-from collections import deque
 
 from websockets.exceptions import InvalidStatusCode
 
-from ..domain.asr_protocol import ProviderError, text_event
+from ..domain.asr_protocol import ProviderError
+from ..domain.transcript import ResultEmitter
+from .base import StreamingProvider
 from .transport import connect
 
-FRAME_BYTES = 640
 BYTES_PER_SECOND = 32000
-MAX_SEGMENT_BYTES = 15 * BYTES_PER_SECOND
+MAX_QUEUED_BYTES = 15 * BYTES_PER_SECOND
 LOGGER = logging.getLogger(__name__)
 
 
-class BosonProvider:
+class BosonProvider(StreamingProvider):
     label = "Boson AI"
     text_processing = "native"
     finish_timeout = 35
@@ -44,12 +42,10 @@ class BosonProvider:
         self.completed.set()
         self.pending = None
         self.failure = None
-        self.finalized = deque(maxlen=512)
+        self.results = ResultEmitter()
         self.ending = False
         self.closed = False
-        self.probing = False
-        self.total = self.start = self.segment_bytes = self.voice_end = 0
-        self.preroll = bytearray()
+        self.total = self.start = 0
         self.outgoing = bytearray()
         self.trace_id = uuid.uuid4().hex[:12]
         self.segment_number = 0
@@ -69,7 +65,9 @@ class BosonProvider:
             "session.idle_timeout", "session.max_duration_reached",
         ):
             # Never expose arbitrary upstream messages, which may echo input or keys.
-            raise ProviderError("Boson AI 转写失败或会话到期，请检查 Key、额度及模型权限")
+            detail = event.get("error")
+            detail = detail if isinstance(detail, dict) else {}
+            raise ProviderError.upstream("Boson AI", detail.get("code"), detail.get("type"))
         return event
 
     async def open(self):
@@ -82,9 +80,7 @@ class BosonProvider:
                 open_timeout=6, close_timeout=1, max_size=4 * 1024 * 1024,
             )
         except InvalidStatusCode as error:
-            raise ProviderError(
-                "Boson AI 连接失败（HTTP %d），请检查 API Key 和额度" % error.status_code
-            ) from None
+            raise ProviderError.upstream("Boson AI", error.status_code) from None
         transcription = {"model": self.config["model"]}
         if self.config["language"] != "auto":
             transcription["language"] = self.config["language"]
@@ -122,7 +118,6 @@ class BosonProvider:
         )
         self.completed.clear()
         await self._send("input_audio_buffer.commit")
-        self.segment_bytes = 0
 
     async def _wait_pending(self):
         if self.failure:
@@ -135,29 +130,31 @@ class BosonProvider:
     async def probe(self):
         # Validate actual model access, not just a WebSocket handshake. Its silent
         # transcript is discarded by the management probe, never sent to clients.
-        self.probing = True
-        try:
-            # Go through send_audio so Portal's probe quota/metering wrapper sees it.
-            await self.send_audio(bytes(6400), last=True)
-            await self.uploader
-            await self._wait_pending()
-        finally:
-            self.probing = False
+        # Go through send_audio so Portal's probe quota/metering wrapper sees it.
+        await self.write_audio(bytes(6400))
+        await self.finish_input()
+        await self._wait_pending()
 
     async def send_audio(self, pcm, last=False):
         if self.input_ended or self.closed:
             raise ProviderError("Boson AI 录音会话已经结束")
         if len(pcm) % 2:
             raise ProviderError("音频必须为 16 kHz 单声道 PCM16")
-        if self.failure:
-            raise self.failure
-        # Do not block the Portal's client reader behind a slow transcription:
-        # it must remain able to process cancel/disconnect immediately.
-        if self.audio.full() or self.queued_bytes + len(pcm) > MAX_SEGMENT_BYTES:
-            raise ProviderError("Boson AI 转写积压，请停止录音并检查网络后重试")
-        self.queued_bytes += len(pcm)
-        self.input_ended = last
-        self.audio.put_nowait((bytes(pcm), last))
+        for offset in range(0, max(1, len(pcm)), 6400):
+            if self.closed:
+                raise ProviderError("Boson AI 录音会话已经结束")
+            if self.failure:
+                raise self.failure
+            chunk = bytes(pcm[offset:offset + 6400])
+            # Count real backlog, not a burst that has never let the uploader run.
+            # A stalled upstream still fails at a bounded queue rather than
+            # blocking Portal's reader from processing cancellation.
+            if self.audio.full() or self.queued_bytes + len(chunk) > MAX_QUEUED_BYTES:
+                raise ProviderError("Boson AI 转写积压，请停止录音并检查网络后重试")
+            self.queued_bytes += len(chunk)
+            self.input_ended = last and offset + 6400 >= len(pcm)
+            self.audio.put_nowait((chunk, self.input_ended))
+            await asyncio.sleep(0)
 
     async def _upload(self):
         try:
@@ -165,49 +162,30 @@ class BosonProvider:
                 pcm, last = await self.audio.get()
                 await self._process_audio(pcm, last)
                 self.queued_bytes -= len(pcm)
+                self.audio.task_done()
                 if last:
                     return
         except Exception as error:
             self.failure = error
             await self.events.put(error)
 
+    async def finish_input(self):
+        await self.send_audio(b"", last=True)
+        await self.uploader
+        if self.failure:
+            raise self.failure
+
     async def _process_audio(self, pcm, last):
-        for offset in range(0, len(pcm), FRAME_BYTES):
-            await self._wait_pending()
-            frame = pcm[offset:offset + FRAME_BYTES]
-            self.total += len(frame)
-            samples = array.array("h", frame)
-            if sys.byteorder != "little":
-                samples.byteswap()
-            speaking = self.probing or (
-                sum(sample * sample for sample in samples) / len(samples) >= 10737
-            )
-            if not self.segment_bytes:
-                self.preroll.extend(frame)
-                if not speaking:
-                    del self.preroll[:-6400]
-                    continue
-                self.start = self.total - len(self.preroll)
-                self.outgoing.extend(self.preroll)
-                self.segment_bytes = len(self.preroll)
-                self.preroll.clear()
-            else:
-                self.outgoing.extend(frame)
-                self.segment_bytes += len(frame)
-            if speaking:
-                self.voice_end = self.total
-            if (self.total - self.voice_end >= self.config["silenceMs"] * 32
-                    or self.segment_bytes >= MAX_SEGMENT_BYTES):
-                await self._commit()
-            elif len(self.outgoing) >= 6400:
-                await self._flush()
+        for offset in range(0, len(pcm), 6400):
+            chunk = pcm[offset:offset + 6400]
+            self.total += len(chunk)
+            self.outgoing.extend(chunk)
+            await self._flush()
         if last:
             self.ending = True
-            if self.segment_bytes:
+            if self.total:
                 await self._commit()
-            elif self.pending is None:
-                if self.failure:
-                    raise self.failure
+            else:
                 await self.events.put(([], True))
 
     async def _read(self):
@@ -223,8 +201,6 @@ class BosonProvider:
                                 self.segment_number, (time.monotonic() - self.pending["committed_at"]) * 1000)
                 elif kind == "conversation.item.input_audio_transcription.completed":
                     identity = event.get("item_id")
-                    if isinstance(identity, str) and identity in self.finalized:
-                        continue
                     if (self.pending is None or not identity
                             or identity != self.pending["id"]
                             or not isinstance(event.get("transcript"), str)):
@@ -233,11 +209,8 @@ class BosonProvider:
                     LOGGER.info("Boson timing session=%s segment=%d final_after_commit_ms=%.1f queued_ms=%d",
                                 self.trace_id, self.segment_number,
                                 (time.monotonic() - self.pending["committed_at"]) * 1000, self.queued_bytes // 32)
-                    events = [text_event(
-                        "final_result", text, self.pending["start"], self.pending["end"],
-                        "boson_realtime",
-                    )] if text.strip() else []
-                    self.finalized.append(identity)
+                    # The sole manual turn has known order, but no word timestamps.
+                    events = self.results.replace(identity, 0, text, stable=True, source="boson_realtime")
                     self.pending = None
                     await self.events.put((events, self.ending))
                     self.completed.set()

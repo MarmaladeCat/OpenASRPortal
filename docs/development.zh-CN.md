@@ -4,7 +4,7 @@
 
 构建间保留 `.cache/build/portable/<架构>/` 和工具链镜像。冻结运行时复用核验代码/资源、配方/版本、不可变镜像 ID、Python/CPU 和每个文件哈希/权限；仅改文档仍重新打包并生成当前来源记录。输入变化或缓存损坏会重新冻结。Windows 在 `.cache/windows/wheels/` 保存经过哈希核验的完整 wheelhouse，以依赖及目标 Python/架构为键，使用 `--no-index` 离线安装。保留 Python/WinSW 下载和通用 jieba wheel，需要刷新依赖时才显式删除 wheelhouse。一次性打包暂存可清理，数据库和模型目录不是构建缓存。
 
-旧百炼 HTTP 档案读取时规范化为流式模型及 WSS 路径，保存时持久化；不要重新引入 HTTP 预览请求。流式用量按任务累计，不是每事件独立用量；保留历史数据库预留列兼容，但新流不使用。Soniox 稳定词只累积一次，临时词替换后缀；端点/结束定稿不能重复文字。协议修改需配套提供商测试和双语配置契约。
+旧百炼 HTTP 档案读取时规范化为流式模型及 WSS 路径，保存时持久化；不要重新引入 HTTP 预览请求。百炼正常句号从 1 起算，映射到从 0 开始的内部音频顺序；忽略句号为 0 的心跳。流式用量按任务累计，不是每事件独立用量；只有正常完成且终止事件省略用量时，才用最后稳定分句报告结算。保留历史数据库预留列兼容，但新流不使用。Soniox 稳定词只累积一次，临时词替换后缀；端点/结束定稿不能重复文字。协议修改需配套提供商测试和双语配置契约。
 
 本服务源码使用 Python 3.10+、aiohttp 与本产品 SQLite。无需 Electron 或模型运行时；浏览器回归的工具另行安装。协议参考 [客户端 API](API.zh-CN.md) 和 [管理 API](MANAGEMENT.zh-CN.md)。
 
@@ -21,6 +21,8 @@ python3 -m venv .venv
 Windows 对应使用 `py -3.12 -m venv .venv` 和 `.venv\Scripts\python.exe`，相同模块命令可运行。打开 `/admin` 完成首次密码设置；数据目录独立，不读取真实部署数据库。配置 host、port、data 可用 `OPENASRPORTAL_HOST/PORT/DATA`，管理与识别凭据从数据库管理，旧的凭据环境变量不生效。
 
 ## 迭代与验证
+
+识别改动遵守[类型化结果与生命周期契约](recognition-contract.zh-CN.md)。供应商 wire 身份留在适配器，排序、截止时间、PCM 准入、文件提交使用公共机制。文件屏障观察 HTTP writer 最后字节和 drain，不以 yield 或响应代替。仅 OpenAI Realtime 按需载入 NumPy／SoXR，连续 float32 滤波后显式量化 PCM16；打包必须收集 SoXR 原生库，并在每种目标私有运行时验证转换。文件 WAV 保持 16 kHz。
 
 ```bash
 python scripts/test.py setup --suite unit
@@ -42,7 +44,9 @@ python scripts/build.py --deployment windows --arch amd64 --wix-bin <WiX目录>
 
 deb 使用 Ubuntu 22.04 / SHA256 固定的 Python 3.12.10 / PyInstaller 6.16.0；镜像使用 Python 3.12.10 / Debian 12。DEB 私有解释器支持 HTTPS 代理双层 TLS，并保持 Ubuntu 22.04 的 libc 基线。源码安装使用 HTTPS 代理需 Python 3.11+。MSI 构建编排使用原生 Windows Python 3.12.10 与 WiX 3.14.1，包内私有运行时为 Python 3.13.16、服务包装器 WinSW 2.12.0。构建配方在 packaging/，入口再调用 `build_portable_deb.py`、`build_image.py` 或 `build_windows.py`，不依赖外层源码。
 
-候选在 `.cache/build/artifacts/<系统>/<架构>/<变体>/`，发布到 `release/1.1.1/`。VERSION 与工具包版本均为 1.1.1。目录平铺 deb、镜像部署包、MSI、文档 ZIP、中英文 README、manifest.json 与 SHA256SUMS；Docker 包包含真实 image.tar 和手写部署说明。dist/ 不作为输出目录。
+Windows 还从经过哈希校验的 `msvc-runtime==14.51.36231` wheel 打包应用私有 Microsoft C++ 运行库及许可。DLL 放在私有 `python.exe` 旁；CPython 嵌入式 ZIP 本身缺少 SoXR 所需的 `MSVCP140.dll`。原生构建在生成 MSI 前实际执行转换与末尾 flush。这些私有运行库通过重建安装包更新，解包后的运行时按[测试约束](testing.zh-CN.md)验证。
+
+候选在 `.cache/build/artifacts/<系统>/<架构>/<变体>/`，发布到 `release/1.2.0/`。VERSION 与工具包版本均为 1.2.0。目录平铺 deb、镜像部署包、MSI、文档 ZIP、中英文 README、manifest.json 与 SHA256SUMS；Docker 包包含真实 image.tar 和手写部署说明。dist/ 不作为输出目录。
 
 发布器检查来源、唯一候选、版本、架构和哈希后替换目录，同源的其他平台产物合并保留。构建成功不代表已完成服务安装、升级、卸载或真实识别验收；运行记录放 test-results/。
 

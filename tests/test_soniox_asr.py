@@ -26,10 +26,14 @@ class TokenTests(unittest.TestCase):
         return self.provider.parse(json.dumps({"tokens": tokens, **extra}))[0]
 
     def texts(self, events):
-        return [(e["type"], e["nbest"][0]["sentence"]) for e in events]
+        return [("final_result" if e.stable else "partial_result", e.text) for e in events]
 
     def test_config_secret_retention_and_validation(self):
-        self.assertEqual(self.provider.parameters()['language_hints'], ['en', 'zh'])
+        self.assertEqual(self.provider.parameters()['language_hints'], ['zh', 'en'])
+        self.assertFalse(self.provider.parameters()["enable_endpoint_detection"])
+        self.assertNotIn("max_endpoint_delay_ms", self.provider.parameters())
+        self.provider.config["endpointDetection"] = True
+        self.assertEqual(self.provider.parameters()["max_endpoint_delay_ms"], 2000)
         config = validate_config(SONIOX_MODEL, {"language": "zh"}, self.provider.config)
         self.assertEqual(config["apiKey"], "fictional")
         for change in ({"endpoint": "wss://example.org"}, {"model": "stt-async-v4"},
@@ -40,16 +44,16 @@ class TokenTests(unittest.TestCase):
     def test_empty_endpoint_and_unbounded_segment(self):
         self.assertEqual(self.feed([token("<end>", True)]), [])
         with self.assertRaises(ProviderError):
-            self.feed([token("x" * 65537, True)])
+            self.feed([token("x" * 262145, True)])
 
     def test_stable_tokens_accumulate_and_provisional_suffix_is_replaced(self):
         self.assertEqual(self.texts(self.feed([token("Hello", False)])), [("partial_result", "Hello")])
         self.assertEqual(self.texts(self.feed([token("Hello", True), token(" word", False)])),
-                         [("partial_result", "Hello word")])
-        self.assertEqual(self.texts(self.feed([token(" world", False)])), [("partial_result", "Hello world")])
+                         [("final_result", "Hello"), ("partial_result", " word")])
+        self.assertEqual(self.texts(self.feed([token(" world", False)])), [("partial_result", " world")])
         self.assertEqual(self.texts(self.feed([token(" world", True), token("<end>", True),
                                               token("Next", False, 200, 300)])),
-                         [("final_result", "Hello world"), ("partial_result", "Next")])
+                          [("final_result", " world"), ("partial_result", "Next")])
         self.provider.ending = True
         self.assertEqual(self.texts(self.feed([token("Next", True, 200, 300)], finished=True)),
                          [("final_result", "Next")])
@@ -65,9 +69,31 @@ class TokenTests(unittest.TestCase):
         self.provider.ending = True
         with self.assertRaises(ProviderError):
             self.feed([token("unfinished", False)], finished=True)
-        self.feed([token("unfinished", False)])
-        with self.assertRaises(ProviderError):
-            self.feed([], finished=True)
+
+    def test_finished_withdraws_old_provisional_suffix_and_keeps_only_stable_text(self):
+        for stable in ("", "Stable"):
+            with self.subTest(stable=stable):
+                self.setUp()
+                tokens = [token(stable, True)] if stable else []
+                self.feed([*tokens, token(" withdrawn", False)])
+                self.provider.ending = True
+                events, finished = self.provider.parse('{"tokens":[],"finished":true}')
+                self.assertTrue(finished)
+                self.assertEqual(self.texts(events), [("final_result", "")])
+                self.provider.results.finish()
+                self.assertEqual(self.feed([], finished=True), [])
+
+    def test_endpoint_withdrawal_allows_empty_final_and_a_following_sentence(self):
+        for stable in ("", "Stable"):
+            with self.subTest(stable=stable):
+                self.setUp()
+                tokens = [token(stable, True)] if stable else []
+                self.feed([*tokens, token(" withdrawn", False)])
+                self.assertEqual(self.texts(self.feed([token("<end>", True), token("Next", False, 200, 300)])),
+                                 [("final_result", ""), ("partial_result", "Next")])
+                self.provider.ending = True
+                self.assertEqual(self.texts(self.feed([token("Next", True, 200, 300), token("<fin>", True)], finished=True)),
+                                 [("final_result", "Next")])
 
     def test_context_budget_and_no_weight_or_api_key_in_start(self):
         terms = [{"text": "长词" * 20, "weight": 5}] * 2000
@@ -86,7 +112,8 @@ class BusinessTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         self.controls = []
         self.closed = asyncio.Event()
         self.stall = False
-        self.fail = False
+        self.upstream_fail = False
+        self.withdraw = None
         async def handle(ws):
             self.assertEqual(ws.request_headers["Authorization"], "Bearer fictional")
             self.start = json.loads(await ws.recv())
@@ -94,13 +121,17 @@ class BusinessTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
                 async for message in ws:
                     if isinstance(message, bytes):
                         self.audio.append(message)
-                        await ws.send(json.dumps({"tokens": [token("正在", False)]}))
+                        tokens = [token("正在", False)]
+                        if self.withdraw:
+                            tokens.insert(0, token(self.withdraw, True))
+                        await ws.send(json.dumps({"tokens": tokens}))
                     elif message == "":
                         self.controls.append(message)
-                        if self.fail:
+                        if self.upstream_fail:
                             await ws.send('{"error_code":400,"error_message":"fictional"}')
                         elif not self.stall:
-                            await ws.send(json.dumps({"tokens": [token("正在识别。", True), token("<end>", True)]}))
+                            if self.withdraw is None:
+                                await ws.send(json.dumps({"tokens": [token("正在识别。", True), token("<end>", True)]}))
                             await ws.send('{"tokens":[],"finished":true}')
                     else:
                         self.controls.append(json.loads(message))
@@ -148,6 +179,24 @@ class BusinessTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.usage.quota("profile", "soniox")["usedSeconds"], 0.2)
         self.assertEqual(self.store.usage.quota("key", self.key_id)["usedSeconds"], 0)
 
+    async def test_withdrawn_preview_finishes_public_v1_with_only_stable_text(self):
+        for stable in ("", "稳定前缀"):
+            self.withdraw = stable
+            socket = await self.session()
+            await socket.receive_json()
+            await socket.send_bytes(bytes(6400))
+            if stable:
+                first = await socket.receive_json(timeout=2)
+                self.assertEqual((first["type"], first["text"]), ("transcript.final", stable))
+            partial = await socket.receive_json(timeout=2)
+            await socket.send_json({"type": "audio.end"})
+            events = await self.terminal(socket)
+            self.assertEqual([(e["type"], e.get("text")) for e in events],
+                              [("transcript.final", ""), ("session.finished", None)])
+            self.assertEqual(events[0]["utteranceId"], partial["utteranceId"])
+            self.assertEqual(events[-1]["finalCount"], 2 if stable else 1)
+            await socket.close()
+
     async def test_keepalive_and_cancel_close_without_finalizing(self):
         socket = await self.session()
         await socket.receive_json()
@@ -166,6 +215,7 @@ class BusinessTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
     async def test_final_timeout_is_an_error(self):
         self.stall = True
         socket = await self.session()
+        await socket.receive_json()
         await socket.send_bytes(bytes(6400))
         await socket.send_json({"type": "audio.end"})
         events = await self.terminal(socket)
@@ -175,6 +225,7 @@ class BusinessTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
     async def test_error_and_duration_quota(self):
         self.store.usage.update_quota("profile", "soniox", {"remainingSeconds": 0.1})
         socket = await self.session()
+        await socket.receive_json()
         await socket.send_bytes(bytes(6400))
         events = await self.terminal(socket)
         self.assertEqual(events[-1]["reason"], "quota_exhausted")
@@ -182,8 +233,10 @@ class BusinessTests(UsageApiFixture, unittest.IsolatedAsyncioTestCase):
         await socket.close()
         self.store.usage.update_quota("profile", "soniox", {"remainingSeconds": 10})
         self.store.set_default("soniox")
-        self.fail = True
+        self.upstream_fail = True
         socket = await self.session()
+        await socket.receive_json()
+        await socket.send_bytes(bytes(2))
         await socket.send_json({"type": "audio.end"})
         events = await self.terminal(socket)
         self.assertEqual(events[-1]["type"], "session.error")

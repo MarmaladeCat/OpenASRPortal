@@ -27,6 +27,7 @@ PYTHON_VERSION = "3.13.16"
 PYTHON_SHA256 = "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297"
 WINSW_VERSION = "2.12.0"
 WINSW_SHA256 = "b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f"
+MSVC_RUNTIME_VERSION = "14.51.36231"
 UPGRADE = uuid.UUID("64e55bb5-b8eb-40fa-bc40-089420d7c0a0")
 
 
@@ -108,7 +109,7 @@ def wix(payload, filename):
     install = element(program_files, "Directory", Id="INSTALLDIR", Name="OpenASRPortal")
     data = element(target, "Directory", Id="CommonAppDataFolder")
     shared = element(data, "Directory", Id="OpenASRDataRoot", Name="OpenASR")
-    element(shared, "Directory", Id="PORTALDATADIR", Name="Portal")
+    element(shared, "Directory", Id="PORTALDATADIR", Name="portal")
     menu = element(
         element(target, "Directory", Id="ProgramMenuFolder"),
         "Directory",
@@ -556,6 +557,28 @@ def download(url, destination, digest):
         temporary.unlink(missing_ok=True)
 
 
+def prepare_cpp_runtime(python):
+    # CPython's embeddable ZIP includes the C runtime, but not MSVCP140.dll,
+    # required by SoXR's C++ extension. Keep the redistributables app-local.
+    directory = wheel_cache["wheelhouse"](
+        CACHE / "wheels", ["msvc-runtime==" + MSVC_RUNTIME_VERSION], "3.13"
+    )
+    wheel, = directory.glob("msvc_runtime-*.whl")
+    with zipfile.ZipFile(wheel) as archive:
+        prefix = f"msvc_runtime-{MSVC_RUNTIME_VERSION}.data/data/Scripts/"
+        libraries = [name for name in archive.namelist()
+                     if name.startswith(prefix) and name.endswith(".dll")]
+        if not {"msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"}.issubset(
+            Path(name).name for name in libraries
+        ):
+            raise RuntimeError("Incomplete Windows C++ runtime wheel")
+        for name in libraries:
+            (python / Path(name).name).write_bytes(archive.read(name))
+        (python / "LICENSE-msvc-runtime.txt").write_bytes(archive.read(
+            f"msvc_runtime-{MSVC_RUNTIME_VERSION}.dist-info/licenses/LICENSE"
+        ))
+
+
 def prepare_runtime(payload):
     archive = CACHE / f"python-{PYTHON_VERSION}-embed-amd64.zip"
     download(
@@ -611,6 +634,17 @@ def prepare_runtime(payload):
         ],
         check=True,
     )
+    prepare_cpp_runtime(payload / "python")
+    if os.name == "nt":
+        subprocess.run(
+            [str(payload / "python/python.exe"), "-I", "-B", "-c",
+             "from openasrportal.providers.resample import PCM24k; "
+             "c = PCM24k(); a = c.convert(bytes(320)); b = c.convert(bytes(14), last=True); "
+             "assert c.source_samples == 167 and abs(c.output_samples - 250.5) <= 1; "
+             "assert not any(a + b) and c.stream.delay() == 0; "
+             "print('PASS private Windows SoXR conversion and flush')"],
+            cwd=payload, check=True,
+        )
 
 
 def main():
@@ -690,6 +724,7 @@ def main():
             "pythonSha256": PYTHON_SHA256,
             "winsw": WINSW_VERSION,
             "winswSha256": WINSW_SHA256,
+            "msvcRuntime": MSVC_RUNTIME_VERSION,
             "validation": "built-on-windows" if os.name == "nt" else "cross-built-unverified",
         }
         (payload / "build.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
