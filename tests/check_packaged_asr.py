@@ -1,6 +1,6 @@
 """Exercise extracted private runtimes against loopback-only OpenAI wire fixtures.
 
-Run inside an isolated network namespace/VM: this owns loopback proxy port 7890.
+Uses an OS-assigned loopback proxy port and disposable service data.
 No real upstream or API key is used. Service configuration uses public APIs only.
 """
 
@@ -144,7 +144,8 @@ async def check(args, report):
                                          return_exceptions=True)
                     tunnels.discard(task)
 
-            proxy = await asyncio.start_server(tunnel, "127.0.0.1", 7890)
+            proxy = await asyncio.start_server(tunnel, "127.0.0.1", 0)
+            proxy_port = proxy.sockets[0].getsockname()[1]
             with socket.socket() as reservation:
                 reservation.bind(("127.0.0.1", 0))
                 port = reservation.getsockname()[1]
@@ -181,7 +182,7 @@ async def check(args, report):
                             "password": password, "confirmPassword": password,
                             "setupChallenge": status["setupChallenge"]}))["token"]
                         key = (await api("POST", "/v1/admin/asr-keys", {"title": "package-fixture"}, admin))["key"]
-                        await api("PATCH", "/v1/admin/settings", {"proxy": {"url": "http://127.0.0.1:7890"}}, admin)
+                        await api("PATCH", "/v1/admin/settings", {"proxy": {"url": f"http://127.0.0.1:{proxy_port}"}}, admin)
                         for mode in ("realtime", "json", "sse"):
                             provider = "openai_realtime" if mode == "realtime" else "openai_file"
                             config = {"apiKey": "fictional-packaged-key", "useProxy": True}

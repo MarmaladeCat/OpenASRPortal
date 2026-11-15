@@ -49,7 +49,7 @@ After building the matching candidate:
 python tests/check_container.py --image openasrportal:test
 ```
 
-In an isolated network namespace or VM, run `python tests/check_packaged_asr.py --runtime <extracted-runtime> --results test-results/<new-run>`. On Windows, pass the extracted private `python.exe` and add `--python-runtime`. The check owns loopback proxy port 7890, trusts a disposable fixture certificate only in the child, and exercises packaged SoXR conversion/flush plus file JSON/SSE through public APIs. Its upstream is simulated; it needs no real credential or Internet access and is separate from installer acceptance.
+Run `python tests/check_packaged_asr.py --runtime <extracted-runtime> --results test-results/<new-run>` with isolated test data. On Windows, pass the extracted private `python.exe` and add `--python-runtime`. The check allocates an ephemeral loopback proxy port, trusts a disposable fixture certificate only in the child, and exercises packaged SoXR conversion/flush plus file JSON/SSE through public APIs. It does not change the system proxy. Its upstream is simulated; it needs no real credential or Internet access and is separate from installer acceptance.
 
 ## Results
 

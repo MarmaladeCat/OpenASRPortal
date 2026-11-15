@@ -54,7 +54,7 @@ Boson 适配测试使用模拟 WebSocket 覆盖手动轮次初始化、定稿顺
 python tests/check_container.py --image openasrportal:test
 ```
 
-在隔离网络命名空间或 VM 内运行 `python tests/check_packaged_asr.py --runtime <解包运行时> --results test-results/<新轮次>`；Windows 传入解包后的私有 `python.exe` 并添加 `--python-runtime`。检查独占回环代理端口 7890，仅让子进程信任一次性夹具证书，经公开 API 验证包内 SoXR 转换／flush 与文件 JSON/SSE。上游为模拟服务，不需要真实凭据或互联网，不能代替安装器验收。
+使用隔离测试数据运行 `python tests/check_packaged_asr.py --runtime <解包运行时> --results test-results/<新轮次>`；Windows 传入解包后的私有 `python.exe` 并添加 `--python-runtime`。检查由系统分配临时回环代理端口，仅让子进程信任一次性夹具证书，经公开 API 验证包内 SoXR 转换／flush 与文件 JSON/SSE，不修改系统代理。上游为模拟服务，不需要真实凭据或互联网，不能代替安装器验收。
 
 ## 结果规则
 
